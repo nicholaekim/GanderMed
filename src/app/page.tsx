@@ -249,9 +249,9 @@ export default function Dashboard() {
 
       <footer className="mt-10 border-t border-slate-200 pt-4 text-[11px] leading-relaxed text-slate-400">
         Product data: Health Canada Drug Product Database (nightly-updated, queried live). Conflict
-        rules: demonstration ruleset v{RULESET_VERSION} — to be replaced by a licensed clinical
-        interaction database and validated by a pharmacist before any public release. This tool does
-        not provide medical advice.
+        rules: curated demonstration ruleset v{RULESET_VERSION} plus the DDInter open-access dataset
+        where imported — still not a licensed clinical database, and pending pharmacist validation
+        before any public release. This tool does not provide medical advice.
       </footer>
     </div>
   );

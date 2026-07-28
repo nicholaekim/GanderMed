@@ -153,16 +153,20 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 function seedRules(db: DatabaseSync) {
   const current = db
-    .prepare("SELECT source_version FROM interaction_rules LIMIT 1")
-    .get() as { source_version: string } | undefined;
-  if (current?.source_version === RULESET_VERSION) return;
+    .prepare("SELECT 1 FROM interaction_rules WHERE source_version = ? LIMIT 1")
+    .get(RULESET_VERSION);
+  if (current) return;
 
   const rules = expandRules();
   db.exec("BEGIN");
   try {
-    db.prepare("DELETE FROM interaction_rules").run();
+    // Replace only the curated rows; imported datasets (e.g. DDInter, loaded
+    // by scripts/import-ddinter.ts) are managed separately and left intact.
+    // OR REPLACE makes curated rules win pair collisions with imports —
+    // their hand-written mechanisms and actions are richer.
+    db.prepare("DELETE FROM interaction_rules WHERE source = ?").run(RULESET_SOURCE);
     const insert = db.prepare(
-      `INSERT OR IGNORE INTO interaction_rules
+      `INSERT OR REPLACE INTO interaction_rules
        (ingredient_a, ingredient_b, severity, evidence, mechanism, recommended_action, source, source_version)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );

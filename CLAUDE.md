@@ -28,6 +28,7 @@ Canadian medication logger with drug-conflict detection (formerly "Drug Conflict
 
 - `npm run dev` — dev server on :3000. The script runs node with `--use-system-ca` because this machine's TLS interception breaks Node's bundled CA verification for outbound HTTPS (Health Canada API calls fail without it). Keep that flag.
 - `npm test` — golden safety suite (node:test via tsx, in-memory SQLite with real schema + rules). Run it after ANY change to normalize/conflicts/exposure/reviews — these are the safety-critical paths. Add a golden case when fixing any engine bug.
+- `npm run import:ddinter` — loads DDInter CSVs from `data/ddinter/` (gitignored; ~120k graded pairs). Rule layering: curated rows (source = RULESET_SOURCE) and DDInter rows coexist in interaction_rules; seedRules deletes/REPLACEs only curated rows (curated wins collisions), the importer deletes/IGNOREs only DDInter rows. Don't "simplify" this back to a full-table wipe — it would destroy the import on every version bump.
 - `npx tsc --noEmit` — type check. No ESLint configured.
 - DB is `data/medsafe.db`; delete it to reset all user data (schema + rules reseed on next request). Ruleset reseeds automatically when `RULESET_VERSION` changes.
 

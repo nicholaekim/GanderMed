@@ -6,7 +6,8 @@
     "dev": "node --use-system-ca node_modules/next/dist/bin/next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test tests/normalize.test.ts tests/conflicts.test.ts tests/exposure.test.ts"
+    "test": "node --import tsx --test tests/normalize.test.ts tests/conflicts.test.ts tests/exposure.test.ts",
+    "import:ddinter": "node --import tsx scripts/import-ddinter.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

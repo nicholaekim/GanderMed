@@ -9,6 +9,9 @@ data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 
+# DDInter dataset — open-access to download, but not ours to redistribute
+data/ddinter/
+
 .env*
 !.env.example
 *.tsbuildinfo

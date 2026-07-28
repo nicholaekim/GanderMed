@@ -86,5 +86,8 @@ Passwords are salted scrypt hashes; sessions are random tokens in httpOnly cooki
 ## Data sources
 
 - Product identification: **Health Canada Drug Product Database API** (queried live per search; selected products cached locally)
-- Interaction rules: demonstration ruleset compiled from public product-monograph interaction warnings — **not** a licensed clinical database
+- Interaction rules, two coexisting layers (each alert cites which one it came from):
+  - **Curated demonstration ruleset** (~480 pairs) — hand-written mechanisms and actions; wins pair collisions
+  - **DDInter import** (~120k graded pairs) — open-access, literature-curated ([ddinter.scbdd.com](http://ddinter.scbdd.com)). Download the per-ATC CSVs into `data/ddinter/` (kept out of git — free to download, not ours to redistribute), then `npm run import:ddinter`. Re-runnable; skips Unknown-severity pairs.
+  - Still **not** a licensed clinical database (DrugBank Clinical / Medi-Span / FDB remain the pre-launch requirement; DrugBank's academic downloads were paused as of July 2026)
 - Discontinued option, for the record: NLM's free RxNav interaction API was retired January 2, 2024 — don't plan around it

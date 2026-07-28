@@ -244,8 +244,9 @@ export default function AlertsPanel({
             No conflicts detected among your checked medications.
           </p>
           <p className="mt-1 text-xs text-emerald-700/80">
-            Only active medications matched to Health Canada&apos;s database are checked, against a
-            demonstration ruleset — absence of an alert is not proof of safety.
+            Only active medications matched to Health Canada&apos;s database are checked, against
+            curated demo rules plus the DDInter dataset where imported — absence of an alert is not
+            proof of safety.
           </p>
         </div>
       ) : (
