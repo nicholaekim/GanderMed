@@ -1,0 +1,269 @@
+import { DatabaseSync } from "node:sqlite";
+import path from "node:path";
+import fs from "node:fs";
+import { expandRules, RULESET_SOURCE, RULESET_VERSION } from "@/data/interactionRules";
+import { EXPOSURE_VERSION, INGREDIENT_PROFILES } from "@/data/ingredientProfiles";
+import { detectExtendedRelease } from "@/lib/normalize";
+import { generateShareCode } from "@/lib/auth";
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __dcaiDb: DatabaseSync | undefined;
+}
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS medications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL DEFAULT 1 REFERENCES profiles(id),
+  drug_code INTEGER,
+  din TEXT,
+  brand_name TEXT NOT NULL,
+  company_name TEXT,
+  route TEXT,
+  dosage_form TEXT,
+  verified INTEGER NOT NULL DEFAULT 0,
+  dose_value REAL,
+  dose_unit TEXT,
+  is_prn INTEGER NOT NULL DEFAULT 0,
+  schedule_times TEXT NOT NULL DEFAULT '[]',
+  start_date TEXT,
+  end_date TEXT,
+  instructions TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','stopped')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS medication_ingredients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+  ingredient_name TEXT NOT NULL,
+  canonical_name TEXT NOT NULL,
+  strength TEXT,
+  strength_unit TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mi_med ON medication_ingredients(medication_id);
+CREATE INDEX IF NOT EXISTS idx_mi_canon ON medication_ingredients(canonical_name);
+
+CREATE TABLE IF NOT EXISTS dose_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+  scheduled_at TEXT,
+  logged_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('taken','skipped','late')),
+  dose_value REAL,
+  dose_unit TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_de_med ON dose_events(medication_id);
+CREATE INDEX IF NOT EXISTS idx_de_sched ON dose_events(scheduled_at);
+
+CREATE TABLE IF NOT EXISTS interaction_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ingredient_a TEXT NOT NULL,
+  ingredient_b TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('major','moderate','minor')),
+  evidence TEXT NOT NULL,
+  mechanism TEXT NOT NULL,
+  recommended_action TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_version TEXT NOT NULL,
+  UNIQUE (ingredient_a, ingredient_b)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('patient','clinician')),
+  clinic_name TEXT,
+  google_sub TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS care_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  clinician_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (clinician_user_id, profile_id)
+);
+
+CREATE TABLE IF NOT EXISTS alert_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ingredient_a TEXT NOT NULL,
+  ingredient_b TEXT NOT NULL,
+  med_a_id INTEGER NOT NULL,
+  med_b_id INTEGER NOT NULL,
+  reviewer_user_id INTEGER NOT NULL REFERENCES users(id),
+  reviewer_name TEXT NOT NULL,
+  reviewer_clinic TEXT,
+  note TEXT NOT NULL,
+  source_version TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reviews_profile ON alert_reviews(profile_id);
+
+CREATE TABLE IF NOT EXISTS ingredient_profiles (
+  canonical_name TEXT PRIMARY KEY,
+  active_window_hours REAL NOT NULL,
+  max_daily_mg REAL,
+  note TEXT,
+  source_version TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL CHECK (kind IN ('interaction','duplicate')),
+  severity TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  ingredient_a TEXT NOT NULL,
+  ingredient_b TEXT NOT NULL,
+  med_a_id INTEGER NOT NULL,
+  med_b_id INTEGER NOT NULL,
+  med_a_name TEXT NOT NULL,
+  med_b_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  recommended_action TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_version TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  acknowledged_at TEXT,
+  UNIQUE (kind, med_a_id, med_b_id, ingredient_a, ingredient_b)
+);
+`;
+
+function seedRules(db: DatabaseSync) {
+  const current = db
+    .prepare("SELECT source_version FROM interaction_rules LIMIT 1")
+    .get() as { source_version: string } | undefined;
+  if (current?.source_version === RULESET_VERSION) return;
+
+  const rules = expandRules();
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM interaction_rules").run();
+    const insert = db.prepare(
+      `INSERT OR IGNORE INTO interaction_rules
+       (ingredient_a, ingredient_b, severity, evidence, mechanism, recommended_action, source, source_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const r of rules) {
+      insert.run(
+        r.ingredient_a, r.ingredient_b, r.severity, r.evidence,
+        r.mechanism, r.recommended_action, RULESET_SOURCE, RULESET_VERSION
+      );
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+function seedIngredientProfiles(db: DatabaseSync) {
+  const current = db
+    .prepare("SELECT source_version FROM ingredient_profiles LIMIT 1")
+    .get() as { source_version: string } | undefined;
+  if (current?.source_version === EXPOSURE_VERSION) return;
+
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM ingredient_profiles").run();
+    const insert = db.prepare(
+      `INSERT INTO ingredient_profiles (canonical_name, active_window_hours, max_daily_mg, note, source_version)
+       VALUES (?, ?, ?, ?, ?)`
+    );
+    for (const [name, p] of Object.entries(INGREDIENT_PROFILES)) {
+      insert.run(name, p.active_window_hours, p.max_daily_mg, p.note, EXPOSURE_VERSION);
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+// Additive migrations for databases created by earlier versions.
+function migrateColumns(db: DatabaseSync) {
+  try {
+    db.exec("ALTER TABLE medications ADD COLUMN is_extended_release INTEGER NOT NULL DEFAULT 0");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE profiles ADD COLUMN user_id INTEGER REFERENCES users(id)");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE profiles ADD COLUMN share_code TEXT");
+  } catch {
+    // column already exists
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_share ON profiles(share_code)");
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN google_sub TEXT");
+  } catch {
+    // column already exists
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_sub)");
+  // Every profile gets a care code (used by clinicians to link patients).
+  const missing = db.prepare("SELECT id FROM profiles WHERE share_code IS NULL").all() as unknown as { id: number }[];
+  for (const p of missing) {
+    db.prepare("UPDATE profiles SET share_code = ? WHERE id = ?").run(generateShareCode(db), p.id);
+  }
+  // Backfill ER detection for rows inserted before the column existed
+  // (idempotent, tiny table at personal-medication scale).
+  const meds = db
+    .prepare("SELECT id, brand_name, dosage_form, is_extended_release FROM medications")
+    .all() as unknown as { id: number; brand_name: string; dosage_form: string | null; is_extended_release: number }[];
+  const update = db.prepare("UPDATE medications SET is_extended_release = ? WHERE id = ?");
+  for (const m of meds) {
+    const er = detectExtendedRelease(m.brand_name, m.dosage_form) ? 1 : 0;
+    if (er !== m.is_extended_release) update.run(er, m.id);
+  }
+}
+
+/**
+ * Opens (or creates) a database at `location`, applying the full schema,
+ * migrations, and rule seeding. Tests use ":memory:" to get the real
+ * engine environment without touching disk.
+ */
+export function createDatabase(location: string): DatabaseSync {
+  const db = new DatabaseSync(location);
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA foreign_keys = ON;");
+  db.exec(SCHEMA);
+  migrateColumns(db);
+  seedRules(db);
+  seedIngredientProfiles(db);
+  return db;
+}
+
+export function getDb(): DatabaseSync {
+  if (globalThis.__dcaiDb) return globalThis.__dcaiDb;
+
+  const dir = path.join(process.cwd(), "data");
+  fs.mkdirSync(dir, { recursive: true });
+  globalThis.__dcaiDb = createDatabase(path.join(dir, "medsafe.db"));
+  return globalThis.__dcaiDb;
+}

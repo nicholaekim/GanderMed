@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+::selection {
+  background: #c7d2fe;
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  body {
+    background: white !important;
+  }
+}
