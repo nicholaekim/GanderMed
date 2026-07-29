@@ -8,6 +8,7 @@ import { fmtDate, fmtDateTime } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
 import InvitationsPanel from "@/components/InvitationsPanel";
 import MetricsPanel from "@/components/MetricsPanel";
+import OrgPanel from "@/components/OrgPanel";
 
 const PURPOSES = ["Medication review", "MedsCheck preparation", "Post-discharge reconciliation", "Other"];
 
@@ -19,6 +20,7 @@ export default function ClinicPage() {
   const [loaded, setLoaded] = useState(false);
   const [code, setCode] = useState("");
   const [purpose, setPurpose] = useState(PURPOSES[0]);
+  const [requestAs, setRequestAs] = useState<string>("self");
   const [linkMsg, setLinkMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -54,10 +56,15 @@ export default function ClinicPage() {
     setBusy(true);
     setLinkMsg(null);
     try {
+      const asOrg = requestAs !== "self";
       const res = await fetch("/api/care-links", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, purpose }),
+        body: JSON.stringify({
+          code,
+          purpose,
+          ...(asOrg ? { as_org: true, location_id: Number(requestAs) } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -75,13 +82,36 @@ export default function ClinicPage() {
     }
   }
 
-  async function unlink(grantId: number, name: string, isPending: boolean) {
+  async function unlink(grantId: number, name: string, isPending: boolean, via: "individual" | "org" = "individual") {
     const msg = isPending
       ? `Withdraw the pending request for ${name}?`
-      : `Give up access to ${name}? (Their data is not deleted; they'd have to approve a new request.)`;
+      : via === "org"
+        ? `Give up the ORGANIZATION's access to ${name}? Everyone on the team loses it; the patient would have to approve a new request.`
+        : `Give up your personal access to ${name}? (Their data is not deleted; they'd have to approve a new request. Any separate team access is unaffected.)`;
     if (!window.confirm(msg)) return;
     const res = await fetch(`/api/care-links/${grantId}`, { method: "DELETE" });
-    if (res.ok) loadRoster();
+    if (!res.ok) window.alert((await res.json()).error ?? "Could not remove access.");
+    loadRoster();
+  }
+
+  async function upgradeToTeam(profileId: number, name: string) {
+    const activeLocations = me?.org?.locations.filter((l) => l.status === "active") ?? [];
+    if (activeLocations.length === 0) return;
+    if (
+      !window.confirm(
+        `Ask ${name} to share their record with ${me!.org!.name}? They'll see a new request to approve — nothing is shared until they do.`
+      )
+    )
+      return;
+    const res = await fetch("/api/care-links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ upgrade_profile_id: profileId, location_id: activeLocations[0].id }),
+    });
+    const data = await res.json();
+    if (!res.ok) window.alert(data.error ?? "Could not send the request.");
+    else setLinkMsg({ ok: true, text: `Team-access request sent — ${name} must approve it before your team sees anything.` });
+    loadRoster();
   }
 
   async function signOut() {
@@ -95,9 +125,18 @@ export default function ClinicPage() {
     <div className="mx-auto max-w-5xl px-4 py-8">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">🩺 {me.clinic_name ?? "Care team"}</h1>
+          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold tracking-tight">
+            🩺 {me.org?.name ?? me.clinic_name ?? "Care team"}
+            {me.org && (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                Unverified organization
+              </span>
+            )}
+          </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Care-team view · signed in as {me.display_name} · view-only access to linked patients
+            Care-team view · signed in as {me.display_name}
+            {me.org ? ` (${me.org.org_role})` : ""} · view-only access to linked patients ·
+            professional accounts are not identity-verified in this prototype
           </p>
         </div>
         <button
@@ -130,6 +169,23 @@ export default function ClinicPage() {
               <option key={p}>{p}</option>
             ))}
           </select>
+          {me.org && (
+            <select
+              value={requestAs}
+              onChange={(e) => setRequestAs(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
+              title="Requesting for the organization shares the patient with your whole team once they approve"
+            >
+              <option value="self">Myself — {me.display_name}</option>
+              {me.org.locations
+                .filter((l) => l.status === "active")
+                .map((l) => (
+                  <option key={l.id} value={String(l.id)}>
+                    {me.org!.name} — {l.label}
+                  </option>
+                ))}
+            </select>
+          )}
           <button
             disabled={busy || code.trim().length < 8}
             className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
@@ -148,13 +204,22 @@ export default function ClinicPage() {
                 <li key={p.grant_id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
                   <span>
                     {titleCase(p.patient_name)} · {p.purpose ?? "no purpose"} · sent {fmtDate(p.requested_at)}
+                    {p.via === "org" && (
+                      <span className="ml-1.5 rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium text-teal-800">
+                        for {p.organization_name}
+                        {p.location_label ? ` · ${p.location_label}` : ""}
+                        {p.requested_by_name ? ` · by ${p.requested_by_name}` : ""}
+                      </span>
+                    )}
                   </span>
-                  <button
-                    onClick={() => unlink(p.grant_id, titleCase(p.patient_name), true)}
-                    className="text-[11px] text-slate-400 underline hover:text-red-500"
-                  >
-                    withdraw
-                  </button>
+                  {(p.can_withdraw ?? true) && (
+                    <button
+                      onClick={() => unlink(p.grant_id, titleCase(p.patient_name), true)}
+                      className="text-[11px] text-slate-400 underline hover:text-red-500"
+                    >
+                      withdraw
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -162,7 +227,9 @@ export default function ClinicPage() {
         )}
       </section>
 
-      <InvitationsPanel onRosterChanged={loadRoster} />
+      <OrgPanel me={me} />
+
+      <InvitationsPanel onRosterChanged={loadRoster} me={me} />
 
       <section className="mt-6">
         <h2 className="mb-2 text-base font-semibold">Patients ({roster.length})</h2>
@@ -185,8 +252,42 @@ export default function ClinicPage() {
                     {r.patient_email ?? "no account email"} · {r.active_medications} active med
                     {r.active_medications === 1 ? "" : "s"} · last dose{" "}
                     {r.last_dose_at ? fmtDateTime(r.last_dose_at) : "never"}
-                    {r.purpose ? ` · ${r.purpose}` : ""}
-                    {r.expires_at ? ` · access expires ${fmtDate(r.expires_at)}` : ""}
+                  </p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                    {r.access.map((a) => (
+                      <span
+                        key={a.grant_id}
+                        className={`rounded-full px-1.5 py-0.5 font-medium ${
+                          a.via === "org" ? "bg-teal-100 text-teal-800" : "bg-indigo-100 text-indigo-800"
+                        }`}
+                        title={a.purpose ?? undefined}
+                      >
+                        {a.via === "org"
+                          ? `via ${a.organization_name}${a.location_label ? ` · ${a.location_label}` : ""}`
+                          : "you"}
+                        {a.expires_at ? ` · until ${fmtDate(a.expires_at)}` : ""}
+                        {a.via === "org" && a.requested_by_name
+                          ? ` · requested by ${a.requested_by_name}${a.requested_by_active === false ? " (no longer at this pharmacy)" : ""}`
+                          : ""}
+                        {a.can_remove && (
+                          <button
+                            onClick={() => unlink(a.grant_id, titleCase(r.patient_name), false, a.via)}
+                            className="ml-1 underline hover:text-red-600"
+                            title={a.via === "org" ? "Remove team access" : "Remove my access"}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                    {r.can_upgrade && (
+                      <button
+                        onClick={() => upgradeToTeam(r.profile_id, titleCase(r.patient_name))}
+                        className="rounded-full border border-teal-300 px-1.5 py-0.5 font-medium text-teal-700 hover:bg-teal-50"
+                      >
+                        + Request team access
+                      </button>
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -234,12 +335,6 @@ export default function ClinicPage() {
                   >
                     Open record
                   </Link>
-                  <button
-                    onClick={() => unlink(r.grant_id, titleCase(r.patient_name), false)}
-                    className="text-xs text-slate-400 underline hover:text-red-500"
-                  >
-                    remove
-                  </button>
                 </div>
               </div>
             ))}

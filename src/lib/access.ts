@@ -16,6 +16,8 @@ export interface GrantRow {
   id: number;
   profile_id: number;
   clinician_user_id: number;
+  organization_id: number | null;
+  location_id: number | null;
   status: GrantStatus;
   purpose: string | null;
   requested_at: string;
@@ -62,28 +64,44 @@ export function requestAccessByCode(
   db: DatabaseSync,
   clinicianUserId: number,
   code: string,
-  purpose: string
+  purpose: string,
+  org: { organizationId: number; locationId: number } | null = null
 ): { grant: GrantRow; patient_name: string } | { error: "not_found" | "already_open" } {
   const profile = db
     .prepare("SELECT id, name FROM profiles WHERE share_code = ?")
     .get(code) as { id: number; name: string } | undefined;
   if (!profile) return { error: "not_found" };
 
-  const open = db
-    .prepare(
-      "SELECT * FROM access_grants WHERE profile_id = ? AND clinician_user_id = ? AND status IN ('pending','active')"
-    )
-    .get(profile.id, clinicianUserId) as GrantRow | undefined;
+  // Scope-aware duplicates: individual requests collide per (profile,
+  // clinician); org requests collide per (profile, organization) across ALL
+  // requesters. The split partial unique indexes are the DB backstop.
+  const open = org
+    ? (db
+        .prepare(
+          "SELECT * FROM access_grants WHERE profile_id = ? AND organization_id = ? AND status IN ('pending','active')"
+        )
+        .get(profile.id, org.organizationId) as GrantRow | undefined)
+    : (db
+        .prepare(
+          "SELECT * FROM access_grants WHERE profile_id = ? AND clinician_user_id = ? AND organization_id IS NULL AND status IN ('pending','active')"
+        )
+        .get(profile.id, clinicianUserId) as GrantRow | undefined);
   if (open) return { error: "already_open" };
 
   const info = db
     .prepare(
-      `INSERT INTO access_grants (profile_id, clinician_user_id, status, purpose, requested_by_user_id)
-       VALUES (?, ?, 'pending', ?, ?)`
+      `INSERT INTO access_grants (profile_id, clinician_user_id, organization_id, location_id, status, purpose, requested_by_user_id)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?)`
     )
-    .run(profile.id, clinicianUserId, purpose, clinicianUserId);
+    .run(profile.id, clinicianUserId, org?.organizationId ?? null, org?.locationId ?? null, purpose, clinicianUserId);
   const grant = db.prepare("SELECT * FROM access_grants WHERE id = ?").get(Number(info.lastInsertRowid)) as unknown as GrantRow;
-  logAudit(db, { actor: clinicianUserId, action: "access_requested", profileId: profile.id, targetId: grant.id });
+  logAudit(db, {
+    actor: clinicianUserId,
+    action: "access_requested",
+    profileId: profile.id,
+    targetId: grant.id,
+    meta: org ? { as: "organization", org: org.organizationId, location: org.locationId } : undefined,
+  });
   return { grant, patient_name: profile.name };
 }
 
@@ -106,7 +124,15 @@ export function decideGrant(
     db.prepare(
       "UPDATE access_grants SET status = 'active', decided_at = ?, approved_by_user_id = ?, starts_at = ?, expires_at = ? WHERE id = ?"
     ).run(now, patientUserId, now, expires, grantId);
-    logAudit(db, { actor: patientUserId, action: "access_approved", profileId: patientProfileId, targetId: grantId });
+    logAudit(db, {
+      actor: patientUserId,
+      action: "access_approved",
+      profileId: patientProfileId,
+      targetId: grantId,
+      meta: grant.organization_id
+        ? { scope: "organization", org: grant.organization_id, location: grant.location_id ?? 0 }
+        : undefined,
+    });
   } else {
     db.prepare("UPDATE access_grants SET status = 'denied', decided_at = ? WHERE id = ?").run(now, grantId);
     logAudit(db, { actor: patientUserId, action: "access_denied", profileId: patientProfileId, targetId: grantId });
@@ -118,12 +144,13 @@ export function revokeGrant(
   db: DatabaseSync,
   actorUserId: number,
   grantId: number,
-  scope: { patientProfileId?: number; clinicianUserId?: number }
+  scope: { patientProfileId?: number; clinicianUserId?: number; organizationId?: number }
 ): boolean {
   const grant = db.prepare("SELECT * FROM access_grants WHERE id = ?").get(grantId) as GrantRow | undefined;
   if (!grant || !["pending", "active"].includes(grant.status)) return false;
   if (scope.patientProfileId !== undefined && grant.profile_id !== scope.patientProfileId) return false;
   if (scope.clinicianUserId !== undefined && grant.clinician_user_id !== scope.clinicianUserId) return false;
+  if (scope.organizationId !== undefined && grant.organization_id !== scope.organizationId) return false;
 
   db.prepare("UPDATE access_grants SET status = 'revoked', revoked_at = datetime('now') WHERE id = ?").run(grantId);
   logAudit(db, {
@@ -131,7 +158,14 @@ export function revokeGrant(
     action: "access_revoked",
     profileId: grant.profile_id,
     targetId: grantId,
-    meta: { by: scope.patientProfileId !== undefined ? "patient" : "clinician" },
+    meta: {
+      by:
+        scope.patientProfileId !== undefined
+          ? "patient"
+          : scope.organizationId !== undefined
+            ? "organization"
+            : "clinician",
+    },
   });
   return true;
 }

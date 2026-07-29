@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { logAudit } from "@/lib/access";
+import { activeMembership, canReview, getOrg } from "@/lib/org";
 import type { Alert } from "@/lib/types";
 
 const VALID_DAYS = new Set([30, 90, 180]);
@@ -34,14 +35,36 @@ export async function POST(request: Request) {
   const alert = db.prepare("SELECT * FROM alerts WHERE id = ?").get(alertId) as unknown as Alert | undefined;
   if (!alert) return NextResponse.json({ error: "Alert not found." }, { status: 404 });
 
+  // The ONE org authorization decision outside resolveProfileAccess (this
+  // route takes alert_id, not ?patient=). Membership is checked per request:
+  // a deactivated member cannot ride the org grant, even if they were the
+  // original requester. Individual candidates first for attribution.
+  // expires_at values are JS ISO strings — compare against an ISO now, not
+  // datetime('now') (different format).
+  const membership = activeMembership(db, user.id);
   const grant = db
     .prepare(
-      `SELECT 1 FROM access_grants
-       WHERE clinician_user_id = ? AND profile_id = ? AND status = 'active'
-         AND (expires_at IS NULL OR expires_at > datetime('now'))`
+      `SELECT id, organization_id FROM access_grants
+       WHERE profile_id = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > ?)
+         AND ((organization_id IS NULL AND clinician_user_id = ?)
+           OR (organization_id IS NOT NULL AND organization_id = ?))
+       ORDER BY organization_id IS NULL DESC LIMIT 1`
     )
-    .get(user.id, alert.profile_id);
+    .get(alert.profile_id, new Date().toISOString(), user.id, membership?.organization_id ?? -1) as
+    | { id: number; organization_id: number | null }
+    | undefined;
   if (!grant) return NextResponse.json({ error: "No active patient-approved access for this record." }, { status: 403 });
+
+  // Reviews are clinical judgments: under org access, only pharmacists and
+  // owners may write them — the management tier is not the clinical tier.
+  const orgAuthored = grant.organization_id != null;
+  if (orgAuthored && (!membership || !canReview(membership.org_role))) {
+    return NextResponse.json(
+      { error: "Alert reviews require a pharmacist or owner account in your organization." },
+      { status: 403 }
+    );
+  }
+  const reviewerClinic = orgAuthored ? (getOrg(db, grant.organization_id!)?.name ?? user.clinic_name) : user.clinic_name;
 
   db.exec("BEGIN");
   try {
@@ -67,11 +90,17 @@ export async function POST(request: Request) {
       .run(
         alert.profile_id, alert.kind, alert.ingredient_a, alert.ingredient_b,
         alert.med_a_id, alert.med_b_id,
-        user.id, user.display_name, user.clinic_name, note, alert.source_version, expires
+        user.id, user.display_name, reviewerClinic, note, alert.source_version, expires
       );
     db.exec("COMMIT");
     const reviewId = Number(info.lastInsertRowid);
-    logAudit(db, { actor: user.id, action: "review_created", profileId: alert.profile_id, targetId: reviewId });
+    logAudit(db, {
+      actor: user.id,
+      action: "review_created",
+      profileId: alert.profile_id,
+      targetId: reviewId,
+      meta: orgAuthored ? { via: "org", org: grant.organization_id! } : undefined,
+    });
     const review = db.prepare("SELECT * FROM alert_reviews WHERE id = ?").get(reviewId);
     return NextResponse.json({ review });
   } catch (e) {

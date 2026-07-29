@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { fmtDate } from "@/lib/format";
+import type { Me } from "@/lib/types";
 
 const PURPOSES = ["Medication review", "MedsCheck preparation", "Post-discharge reconciliation", "Other"];
 const EXPIRY_DAYS = [3, 7, 14, 30];
@@ -40,11 +41,12 @@ const STATUS_CHIP: Record<string, { label: string; cls: string }> = {
 
 const OPEN_STATES = ["created", "opened", "intake_started", "intake_submitted"];
 
-export default function InvitationsPanel({ onRosterChanged }: { onRosterChanged: () => void }) {
+export default function InvitationsPanel({ onRosterChanged, me }: { onRosterChanged: () => void; me?: Me | null }) {
   const [invitations, setInvitations] = useState<InvitationView[]>([]);
   const [label, setLabel] = useState("");
   const [purpose, setPurpose] = useState(PURPOSES[0]);
   const [expiresDays, setExpiresDays] = useState(7);
+  const [inviteAs, setInviteAs] = useState<string>("self");
   const [freshLink, setFreshLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -67,10 +69,16 @@ export default function InvitationsPanel({ onRosterChanged }: { onRosterChanged:
     setFreshLink(null);
     setCopied(false);
     try {
+      const asOrg = inviteAs !== "self";
       const res = await fetch("/api/invitations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patient_label: label, purpose, expires_days: expiresDays }),
+        body: JSON.stringify({
+          patient_label: label,
+          purpose,
+          expires_days: expiresDays,
+          ...(asOrg ? { as_org: true, location_id: Number(inviteAs) } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -147,6 +155,23 @@ export default function InvitationsPanel({ onRosterChanged }: { onRosterChanged:
             </option>
           ))}
         </select>
+        {me?.org && (
+          <select
+            value={inviteAs}
+            onChange={(e) => setInviteAs(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
+            title="Inviting on behalf of the organization means consent shares the patient with your whole team"
+          >
+            <option value="self">Myself — {me.display_name}</option>
+            {me.org.locations
+              .filter((l) => l.status === "active")
+              .map((l) => (
+                <option key={l.id} value={String(l.id)}>
+                  {me.org!.name} — {l.label}
+                </option>
+              ))}
+          </select>
+        )}
         <button
           disabled={busy}
           className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"

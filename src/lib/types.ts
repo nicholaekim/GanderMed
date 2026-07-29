@@ -161,12 +161,21 @@ export interface ExposureReport {
   totals: RollingTotal[];
 }
 
+export interface OrgContext {
+  id: number;
+  name: string;
+  org_role: "owner" | "admin" | "pharmacist" | "staff";
+  verification_status: "unverified" | "verified";
+  locations: { id: number; label: string; status: "active" | "closed" }[];
+}
+
 export interface Me {
   id: number;
   email: string;
   display_name: string;
   role: "patient" | "clinician";
   clinic_name: string | null;
+  org?: OrgContext | null;
   profile_id: number | null;
   share_code: string | null;
 }
@@ -188,6 +197,19 @@ export interface RosterEntry {
   /** Overall 14-day adherence; null = no scheduled doses were due ("no data", never 0%). */
   adherence_pct: number | null;
   missed_14d: number;
+  /** Every door reaching this patient (deduped roster rows carry them all). */
+  access: {
+    grant_id: number;
+    via: "individual" | "org";
+    purpose: string | null;
+    expires_at: string | null;
+    organization_name: string | null;
+    location_label: string | null;
+    requested_by_name: string | null;
+    requested_by_active: boolean | null;
+    can_remove: boolean;
+  }[];
+  can_upgrade: boolean;
 }
 
 export interface PendingRequest {
@@ -195,6 +217,11 @@ export interface PendingRequest {
   patient_name: string;
   purpose: string | null;
   requested_at: string;
+  via?: "individual" | "org";
+  organization_name?: string | null;
+  location_label?: string | null;
+  requested_by_name?: string | null;
+  can_withdraw?: boolean;
 }
 
 export interface AccessGrantView {
@@ -208,6 +235,14 @@ export interface AccessGrantView {
   revoked_at: string | null;
   clinician_name: string;
   clinic_name: string | null;
+  organization_name?: string | null;
+  org_verification_status?: string | null;
+  location_label?: string | null;
+  location_status?: string | null;
+  requested_by_name?: string | null;
+  requester_active?: number;
+  /** The other door exists too — revoking this one does not remove that one. */
+  overlap?: number;
 }
 
 export interface AuditEventView {
@@ -215,6 +250,8 @@ export interface AuditEventView {
   action: string;
   actor_name: string | null;
   actor_clinic: string | null;
+  /** Resolved org name ("Name (unverified)") when the event happened under org access. */
+  via_org?: string | null;
 }
 
 export interface SearchResult {

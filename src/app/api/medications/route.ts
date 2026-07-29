@@ -18,7 +18,16 @@ export async function GET(request: Request) {
   if ("error" in access) return NextResponse.json({ error: access.error }, { status: access.status });
 
   if (user.role === "clinician") {
-    logAudit(db, { actor: user.id, action: "record_opened", profileId: access.profileId });
+    // The single record_opened log point. Meta carries ids/enums only.
+    logAudit(db, {
+      actor: user.id,
+      action: "record_opened",
+      profileId: access.profileId,
+      meta:
+        access.via === "org"
+          ? { via: "org", org: access.organizationId!, grant: access.grantId! }
+          : { via: "individual", grant: access.grantId! },
+    });
   }
   const profile = db.prepare("SELECT id, name FROM profiles WHERE id = ?").get(access.profileId);
   return NextResponse.json({

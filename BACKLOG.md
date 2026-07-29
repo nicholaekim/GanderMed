@@ -7,15 +7,14 @@ exposure honesty) plus CI; the invitations branch completed Phase 6 and the
 actual-use/patient-notes slice of Phase 7. These remain, in recommended
 order.
 
-## Phase 5 — Pharmacy organization model (designed, NOT implemented)
-A full implementation blueprint exists at
-`design/phase5-organizations-blueprint.json` (judge-panel output: exact DDL,
-resolveProfileAccess org branch, staff-invite lifecycle, roster dedupe,
-consent copy, 30+ decision log, test plan). Highlights to honor: client
-never supplies organization_id (derived from active membership),
-deactivation bites on next read, org-scoped invitations fail closed when
-the minter loses membership, and the alert-reviews route's inline grant
-check must gain the org branch (it bypasses resolveProfileAccess today).
+## Phase 5 — DONE (see CLAUDE.md "Organizations"; blueprint in design/)
+Orgs/locations/members with role tiers, hashed staff join links with
+minter-staleness fail-closed, org-scoped grants under split unique indexes,
+per-request membership enforcement, never-widen consent, org-aware reviews
+gate, roster dedupe, unverified labeling everywhere. Deferred: org-scoped
+reconciliation dispositions (workspace stays individual-grant-only for the
+clinician who opened it — extend via the reviews-route pattern), real org
+verification process, multi-org membership (drop one index).
 - Tables: `organizations`, `organization_locations`, `organization_members`
   (roles: owner/admin, pharmacist, staff), staff invitations.
   (`access_grants.organization_id` already exists and is nullable for this.)

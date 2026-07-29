@@ -9,6 +9,7 @@ import { getDb } from "@/lib/db";
 import { getUserFromRequest, type SessionUser } from "@/lib/auth";
 import { ACCESS_PURPOSES } from "@/lib/access";
 import { createInvitation, listInvitations } from "@/lib/invitations";
+import { activeLocation, activeMembership } from "@/lib/org";
 
 // The explicit union annotation matters: without it TS normalizes the
 // returns into optional-property object types and `"fail" in auth` stops
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
   if ("fail" in auth) return auth.fail;
   const { db, user } = auth;
 
-  let body: { patient_label?: string; purpose?: string; expires_days?: number };
+  let body: { patient_label?: string; purpose?: string; expires_days?: number; as_org?: boolean; location_id?: number };
   try {
     body = await request.json();
   } catch {
@@ -67,10 +68,26 @@ export async function POST(request: Request) {
     ? body.expires_days!
     : 7;
 
+  // Org scope derived from membership, never from the body; a location is
+  // required and must belong to the caller's org and be active.
+  let org: { organizationId: number; locationId: number } | null = null;
+  if (body.as_org) {
+    const membership = activeMembership(db, user.id);
+    if (!membership) {
+      return NextResponse.json({ error: "You are not an active member of an organization." }, { status: 403 });
+    }
+    const location = activeLocation(db, membership.organization_id, Number(body.location_id));
+    if (!location) {
+      return NextResponse.json({ error: "Pick an active location of your organization." }, { status: 400 });
+    }
+    org = { organizationId: membership.organization_id, locationId: location.id };
+  }
+
   const { invitation, token } = createInvitation(db, user.id, {
     patientLabel: label,
     purpose,
     expiresDays,
+    org,
   });
 
   // The raw token appears here and nowhere else; the intake URL is built

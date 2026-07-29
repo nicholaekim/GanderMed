@@ -110,6 +110,57 @@ CREATE TABLE IF NOT EXISTS care_links (
   UNIQUE (clinician_user_id, profile_id)
 );
 
+CREATE TABLE IF NOT EXISTS organizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  created_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  verification_status TEXT NOT NULL DEFAULT 'unverified'
+    CHECK (verification_status IN ('unverified','verified')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS organization_locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  address TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_org_locations_org ON organization_locations(organization_id);
+
+CREATE TABLE IF NOT EXISTS organization_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  org_role TEXT NOT NULL CHECK (org_role IN ('owner','admin','pharmacist','staff')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deactivated')),
+  invited_by_user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  deactivated_at TEXT,
+  deactivated_by_user_id INTEGER REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members(organization_id, status);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_org_members_single_active
+  ON organization_members(user_id) WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS staff_invitations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  invited_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  org_role TEXT NOT NULL CHECK (org_role IN ('admin','pharmacist','staff')),
+  invitee_label TEXT,
+  status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','redeemed','expired','cancelled')),
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  redeemed_at TEXT,
+  redeemed_by_user_id INTEGER REFERENCES users(id),
+  cancelled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_staff_invites_org ON staff_invitations(organization_id, created_at);
+
 CREATE TABLE IF NOT EXISTS reconciliation_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -154,6 +205,7 @@ CREATE TABLE IF NOT EXISTS patient_invitations (
   token_hash TEXT NOT NULL UNIQUE,
   clinician_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   organization_id INTEGER,
+  location_id INTEGER,
   patient_label TEXT,
   purpose TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN
@@ -176,6 +228,7 @@ CREATE TABLE IF NOT EXISTS access_grants (
   profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   clinician_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   organization_id INTEGER,
+  location_id INTEGER,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','active','denied','revoked','expired')),
   purpose TEXT,
   requested_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -188,8 +241,9 @@ CREATE TABLE IF NOT EXISTS access_grants (
 );
 CREATE INDEX IF NOT EXISTS idx_grants_profile ON access_grants(profile_id);
 CREATE INDEX IF NOT EXISTS idx_grants_clinician ON access_grants(clinician_user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_grants_open
-  ON access_grants(profile_id, clinician_user_id) WHERE status IN ('pending','active');
+-- Grant-uniqueness indexes live in migrateColumns (the ux_grants_open family
+-- was split for org scoping; recreating the old index here would undo the
+-- migration on every boot).
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -369,6 +423,45 @@ function migrateColumns(db: DatabaseSync) {
   } catch {
     // column already exists
   }
+  // Phase 5 org scoping — defensive ALTERs for any vintage of DB file.
+  try {
+    db.exec("ALTER TABLE access_grants ADD COLUMN organization_id INTEGER");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE access_grants ADD COLUMN location_id INTEGER");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE patient_invitations ADD COLUMN organization_id INTEGER");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE patient_invitations ADD COLUMN location_id INTEGER");
+  } catch {
+    // column already exists
+  }
+  // Split grant uniqueness for org scoping: one open INDIVIDUAL grant per
+  // (profile, clinician); one open ORG grant per (profile, organization)
+  // across all requesters. Pre-Phase-5 rows (organization_id NULL) land
+  // under the individual index with identical semantics. Idempotent.
+  db.exec("DROP INDEX IF EXISTS ux_grants_open");
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_grants_open_individual
+     ON access_grants(profile_id, clinician_user_id)
+     WHERE status IN ('pending','active') AND organization_id IS NULL`
+  );
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_grants_open_org
+     ON access_grants(profile_id, organization_id)
+     WHERE status IN ('pending','active') AND organization_id IS NOT NULL`
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_grants_org ON access_grants(organization_id) WHERE organization_id IS NOT NULL"
+  );
   try {
     db.exec("ALTER TABLE medications ADD COLUMN replaced_by_id INTEGER REFERENCES medications(id)");
   } catch {

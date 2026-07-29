@@ -120,19 +120,25 @@ export function normalizeShareCode(input: string): string | null {
 /**
  * Resolves which medication profile a request may act on.
  * Patients always act on their own profile. Clinicians may READ profiles
- * only under an ACTIVE, unexpired, patient-approved access grant, via
- * ?patient=<profileId>; they may never write. Expiry is enforced lazily
- * right here, so a lapsed grant blocks the very next request.
+ * only under an ACTIVE, unexpired, patient-approved access grant — either
+ * their own individual grant (organization_id NULL) or a grant naming an
+ * organization they are an ACTIVE member of at this moment (membership is
+ * looked up per request, never cached, so deactivation bites on the very
+ * next read). They may never write. Expiry is enforced lazily per
+ * candidate; an expired individual grant must not block a live org grant,
+ * and vice versa.
  */
 export function resolveProfileAccess(
   db: DatabaseSync,
   user: SessionUser,
   request: Request,
   opts: { write: boolean }
-): { profileId: number } | { error: string; status: number } {
+):
+  | { profileId: number; via: "self" | "individual" | "org"; grantId: number | null; organizationId: number | null }
+  | { error: string; status: number } {
   if (user.role === "patient") {
     if (user.profile_id == null) return { error: "No medication profile for this account.", status: 500 };
-    return { profileId: user.profile_id };
+    return { profileId: user.profile_id, via: "self", grantId: null, organizationId: null };
   }
   if (opts.write) {
     return { error: "Care-team accounts have view-only access to patient records.", status: 403 };
@@ -142,20 +148,48 @@ export function resolveProfileAccess(
   if (!Number.isInteger(profileId)) {
     return { error: "Missing ?patient=<id> for care-team access.", status: 400 };
   }
-  const grant = db
+
+  // Inline membership lookup (org.ts is a leaf; auth.ts must not import
+  // modules that import auth.ts — but org.ts doesn't, so this could import
+  // activeMembership; kept inline to keep auth.ts dependency-free anyway).
+  const membership = db
+    .prepare("SELECT organization_id FROM organization_members WHERE user_id = ? AND status = 'active'")
+    .get(user.id) as { organization_id: number } | undefined;
+
+  // Individual candidates first, for audit attribution. The -1 sentinel
+  // means "no membership" matches no org grant — a deactivated or
+  // never-member clinician can never ride an org grant.
+  const candidates = db
     .prepare(
-      "SELECT id, expires_at FROM access_grants WHERE clinician_user_id = ? AND profile_id = ? AND status = 'active'"
+      `SELECT id, expires_at, organization_id FROM access_grants
+       WHERE profile_id = ? AND status = 'active'
+         AND ((organization_id IS NULL AND clinician_user_id = ?)
+           OR (organization_id IS NOT NULL AND organization_id = ?))
+       ORDER BY organization_id IS NULL DESC, id`
     )
-    .get(user.id, profileId) as { id: number; expires_at: string | null } | undefined;
-  if (grant && grant.expires_at && grant.expires_at <= new Date().toISOString()) {
-    db.prepare("UPDATE access_grants SET status = 'expired' WHERE id = ? AND status = 'active'").run(grant.id);
-    db.prepare(
-      "INSERT INTO audit_events (actor_user_id, action, profile_id, target_id) VALUES (NULL, 'access_expired', ?, ?)"
-    ).run(profileId, grant.id);
-    return { error: "Access to this patient has expired.", status: 403 };
+    .all(profileId, user.id, membership?.organization_id ?? -1) as unknown as {
+    id: number;
+    expires_at: string | null;
+    organization_id: number | null;
+  }[];
+
+  const nowIso = new Date().toISOString();
+  for (const grant of candidates) {
+    if (grant.expires_at && grant.expires_at <= nowIso) {
+      db.prepare("UPDATE access_grants SET status = 'expired' WHERE id = ? AND status = 'active'").run(grant.id);
+      db.prepare(
+        "INSERT INTO audit_events (actor_user_id, action, profile_id, target_id) VALUES (NULL, 'access_expired', ?, ?)"
+      ).run(profileId, grant.id);
+      continue; // an expired door must not block the other one
+    }
+    return {
+      profileId,
+      via: grant.organization_id == null ? "individual" : "org",
+      grantId: grant.id,
+      organizationId: grant.organization_id,
+    };
   }
-  if (!grant) return { error: "No active patient-approved access for this record.", status: 403 };
-  return { profileId };
+  return { error: "No active patient-approved access for this record.", status: 403 };
 }
 
 export function unauthorized() {

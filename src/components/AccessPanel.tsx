@@ -41,8 +41,15 @@ export default function AccessPanel({ initialCode }: { initialCode: string }) {
     load();
   }, [load]);
 
-  async function decide(id: number, action: "approve" | "deny" | "revoke") {
-    if (action === "revoke" && !window.confirm("Revoke this access? They will immediately lose the ability to view your record.")) {
+  async function decide(id: number, action: "approve" | "deny" | "revoke", orgName?: string | null) {
+    if (
+      action === "revoke" &&
+      !window.confirm(
+        orgName
+          ? `Revoke access for ${titleCase(orgName)}? Everyone at this organization immediately loses the ability to view your record.`
+          : "Revoke this access? They will immediately lose the ability to view your record."
+      )
+    ) {
       return;
     }
     const days = Number(expiry[id]);
@@ -90,14 +97,42 @@ export default function AccessPanel({ initialCode }: { initialCode: string }) {
           <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Waiting for your approval</p>
           <div className="mt-1.5 space-y-2">
             {pending.map((g) => (
-              <div key={g.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                <p className="text-sm font-medium">
-                  {titleCase(g.clinician_name)}
-                  {g.clinic_name ? ` · ${titleCase(g.clinic_name)}` : ""}
-                </p>
-                <p className="text-xs text-slate-600">
-                  Purpose: {g.purpose ?? "not stated"} · requested {fmtDate(g.requested_at)}
-                </p>
+              <div
+                key={g.id}
+                className={`rounded-lg border p-3 ${
+                  g.organization_name ? "border-teal-300 bg-teal-50" : "border-amber-200 bg-amber-50"
+                }`}
+              >
+                {g.organization_name ? (
+                  <>
+                    <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                      {titleCase(g.organization_name)}
+                      {g.location_label ? ` — ${g.location_label}` : ""}
+                      <span className="rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                        Unverified organization
+                      </span>
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Requested by {titleCase(g.requested_by_name ?? g.clinician_name)} · Purpose:{" "}
+                      {g.purpose ?? "not stated"} · {fmtDate(g.requested_at)}
+                    </p>
+                    <p className="mt-1.5 rounded-md border border-teal-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                      Approving shares your record, view-only, with <strong>everyone at{" "}
+                      {titleCase(g.organization_name)}</strong> — including staff at other locations and
+                      staff who join later. You can revoke at any time.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium">
+                      {titleCase(g.clinician_name)}
+                      {g.clinic_name ? ` · ${titleCase(g.clinic_name)}` : ""}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Purpose: {g.purpose ?? "not stated"} · requested {fmtDate(g.requested_at)}
+                    </p>
+                  </>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <select
                     value={expiry[g.id] ?? ""}
@@ -122,6 +157,15 @@ export default function AccessPanel({ initialCode }: { initialCode: string }) {
                     Deny
                   </button>
                 </div>
+                {g.overlap ? (
+                  <p className="mt-1.5 text-[10px] text-slate-500">
+                    Note: this professional also has separate personal access — approving or denying
+                    this does not change that.
+                  </p>
+                ) : null}
+                <p className="mt-1.5 text-[10px] text-slate-400">
+                  GanderMed has not verified this professional&apos;s or organization&apos;s credentials.
+                </p>
               </div>
             ))}
           </div>
@@ -137,17 +181,49 @@ export default function AccessPanel({ initialCode }: { initialCode: string }) {
             {active.map((g) => (
               <li key={g.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-teal-200 bg-white px-3 py-2">
                 <div className="text-xs">
-                  <p className="text-sm font-medium">
-                    {titleCase(g.clinician_name)}
-                    {g.clinic_name ? ` · ${titleCase(g.clinic_name)}` : ""}
-                  </p>
-                  <p className="text-slate-500">
-                    {g.purpose ?? "No purpose stated"} · since {fmtDate(g.starts_at)}
-                    {g.expires_at ? ` · expires ${fmtDate(g.expires_at)}` : " · no expiry"}
-                  </p>
+                  {g.organization_name ? (
+                    <>
+                      <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                        {titleCase(g.organization_name)}
+                        {g.location_label
+                          ? ` — ${g.location_label}${g.location_status === "closed" ? " (location closed)" : ""}`
+                          : ""}
+                        <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                          Pharmacy team access
+                        </span>
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                          Unverified
+                        </span>
+                      </p>
+                      <p className="text-slate-500">
+                        Everyone at this organization can view your record · requested by{" "}
+                        {titleCase(g.requested_by_name ?? g.clinician_name)}
+                        {g.requester_active === 0 ? " (no longer there)" : ""} · since {fmtDate(g.starts_at)}
+                        {g.expires_at ? ` · expires ${fmtDate(g.expires_at)}` : " · no expiry"}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium">
+                        {titleCase(g.clinician_name)}
+                        {g.clinic_name ? ` · ${titleCase(g.clinic_name)}` : ""}
+                      </p>
+                      <p className="text-slate-500">
+                        {g.purpose ?? "No purpose stated"} · since {fmtDate(g.starts_at)}
+                        {g.expires_at ? ` · expires ${fmtDate(g.expires_at)}` : " · no expiry"}
+                      </p>
+                    </>
+                  )}
+                  {g.overlap ? (
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      {g.organization_name
+                        ? "A team member also has separate personal access — revoking this does not remove that."
+                        : "This professional's organization also has team access — revoking this does not remove that."}
+                    </p>
+                  ) : null}
                 </div>
                 <button
-                  onClick={() => decide(g.id, "revoke")}
+                  onClick={() => decide(g.id, "revoke", g.organization_name)}
                   className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                 >
                   Revoke
@@ -184,6 +260,7 @@ export default function AccessPanel({ initialCode }: { initialCode: string }) {
               <li key={i}>
                 {fmtDateTime(a.at)} — {a.actor_name ? titleCase(a.actor_name) : "System"}
                 {a.actor_clinic ? ` (${titleCase(a.actor_clinic)})` : ""} {AUDIT_LABELS[a.action] ?? a.action}
+                {a.via_org ? ` via ${a.via_org}` : ""}
               </li>
             ))}
           </ul>

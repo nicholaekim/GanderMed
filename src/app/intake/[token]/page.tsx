@@ -18,6 +18,9 @@ interface IntakeMeta {
   expires_at: string;
   clinician_name: string;
   clinic_name: string | null;
+  organization_name?: string;
+  org_verification_status?: string;
+  location_label?: string | null;
   viewer: "anonymous" | "patient" | "clinician";
   claimed: boolean;
   claimed_by_you: boolean;
@@ -139,7 +142,12 @@ export default function IntakePage({ params }: { params: Promise<{ token: string
     setStep("done");
   }
 
-  const who = meta ? `${meta.clinician_name}${meta.clinic_name ? ` · ${meta.clinic_name}` : ""}` : "";
+  const who = meta
+    ? meta.organization_name
+      ? `${meta.organization_name}${meta.location_label ? ` — ${meta.location_label}` : ""} (requested by ${meta.clinician_name})`
+      : `${meta.clinician_name}${meta.clinic_name ? ` · ${meta.clinic_name}` : ""}`
+    : "";
+  const isOrg = !!meta?.organization_name;
 
   function shell(children: React.ReactNode) {
     return (
@@ -208,7 +216,14 @@ export default function IntakePage({ params }: { params: Promise<{ token: string
         <div className="mt-3 rounded-xl bg-slate-50 p-4 text-sm">
           <div className="flex justify-between gap-4">
             <span className="text-slate-500">Who&apos;s asking</span>
-            <span className="text-right font-medium">{who}</span>
+            <span className="text-right font-medium">
+              {who}
+              {isOrg && (
+                <span className="ml-1.5 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-medium text-amber-800">
+                  Unverified organization
+                </span>
+              )}
+            </span>
           </div>
           <div className="mt-2 flex justify-between gap-4">
             <span className="text-slate-500">Why</span>
@@ -301,6 +316,13 @@ export default function IntakePage({ params }: { params: Promise<{ token: string
           history for: <strong>{meta.purpose}</strong>. Access is view-only, and you can revoke it any
           time from your dashboard.
         </p>
+        {isOrg && (
+          <p className="mt-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-slate-700">
+            <strong>This is a team request:</strong> approving shares your record with{" "}
+            <strong>everyone at {meta.organization_name}</strong> — including staff at other locations
+            and staff who join later. GanderMed has not verified this organization&apos;s credentials.
+          </p>
+        )}
 
         <div className="mt-4">
           <div className="text-xs font-medium text-slate-600">How long should access last?</div>
@@ -341,7 +363,7 @@ export default function IntakePage({ params }: { params: Promise<{ token: string
             disabled={busy}
             className="flex-1 rounded-lg bg-teal-600 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Approve sharing"}
+            {busy ? "Saving…" : isOrg ? `Share with ${meta.organization_name}` : "Approve sharing"}
           </button>
         </div>
         <p className="mt-3 text-center text-xs text-slate-400">
