@@ -131,7 +131,8 @@ export async function GET(request: Request) {
   }
 
   const { cookie: sessionCookie } = createSession(db, user.id);
-  const res = NextResponse.redirect(new URL(user.role === "clinician" ? "/clinic" : "/", origin));
+  const dest = cookie.next ?? (user.role === "clinician" ? "/clinic" : "/");
+  const res = NextResponse.redirect(new URL(dest, origin));
   res.headers.append("Set-Cookie", sessionCookie);
   res.headers.append("Set-Cookie", clearStateCookie());
   return res;

@@ -10,6 +10,17 @@ export interface ProductIngredient {
   strength_unit: string | null;
 }
 
+/** Patient-reported "how I actually take this" — provenance, never a safety signal. */
+export type ActualUse = "taking" | "not_taking" | "taking_differently" | "recently_stopped" | "unsure";
+
+export const ACTUAL_USE_LABELS: Record<ActualUse, string> = {
+  taking: "Taking as listed",
+  not_taking: "Not taking this",
+  taking_differently: "Taking it differently",
+  recently_stopped: "Recently stopped",
+  unsure: "Not sure",
+};
+
 export interface Medication {
   id: number;
   profile_id: number;
@@ -29,6 +40,8 @@ export interface Medication {
   end_date: string | null;
   instructions: string | null;
   status: "active" | "stopped";
+  actual_use: ActualUse;
+  patient_notes: string | null;
   created_at: string;
   ingredients: ProductIngredient[];
 }

@@ -17,6 +17,15 @@ Canadian medication logger with drug-conflict detection (formerly "Drug Conflict
 - Google sign-in: `src/lib/google.ts` + `api/auth/google` (+`/callback`) — hand-rolled OIDC, NOT NextAuth. State nonce + chosen role/clinic ride in the `dcai_oauth` httpOnly cookie; id_token decoded without JWKS verification (OK only because it comes straight from Google's token endpoint over TLS). Google-only users have `password_hash=''` (login route special-cases this); `users.google_sub` links accounts by email on first Google login. Config-optional via `GOOGLE_CLIENT_ID/SECRET` (`/api/auth/providers` tells the login page).
 - Demo-grade by design: no MFA, rate limiting, audit log, or `Secure` cookie flag (http localhost). README lists the clinic-deployment hardening list.
 
+## Invitations & guided intake (v0.9, Phase 6)
+
+- `patient_invitations` + `src/lib/invitations.ts`: clinician mints an intake link (`/intake/<token>`); only the sha256 `token_hash` is stored — the raw token appears once, in the create response. No email/SMS delivery (so no 'sent' state) — links are handed over in person/printed/QR.
+- Status timeline `created→opened→intake_started→intake_submitted→consented|denied→reviewed` (+`expired` lazily at read, +`cancelled`); transitions are forward-only via the TRANSITIONS table. First patient to POST `/start` claims the invitation (`profile_id`); other accounts get 409. After ANY consent decision the token stops accepting writes (410) — found by live smoke, covered by test.
+- Consent-approve creates (or reuses/activates — `ux_grants_open`!) a normal ACTIVE `access_grants` row; deny shares nothing. Same enforcement path as care-code consent.
+- Routes: `/api/invitations` (+`[id]` cancel/mark_reviewed, owner-only), public `/api/intake/[token]` meta (reveals only who/why, marks opened) + `/start` `/submit` `/consent`. Wizard at `app/intake/[token]/page.tsx`; clinic UI in `components/InvitationsPanel.tsx`.
+- Phase 7 slice pulled forward: `medications.actual_use` ('taking'|'not_taking'|'taking_differently'|'recently_stopped'|'unsure') + `patient_notes`, patient-only via PATCH `/api/medications/[id]` — provenance display only (amber badges, report callouts), never a safety signal.
+- Login supports `?next=` (validated: leading `/`, no `//` or `\`) through password, register, and Google (rides the `dcai_oauth` state cookie).
+
 ## Alert reviews (v0.3)
 
 - `alert_reviews` + `src/lib/reviews.ts`: a clinician review is keyed to the combination identity (kind, med pair ids, ingredient pair, source_version) — NOT the alert row id, which is recreated on every recompute. `attachReviews` re-attaches only while identity holds → automatic re-alert on product change / ruleset bump / expiry. Reviews are soft-revoked (`revoked_at`), never deleted; a new review supersedes the previous one for the same combination.

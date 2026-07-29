@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { Alert, DoseEvent, ExposureReport, Medication, Severity } from "@/lib/types";
+import { ACTUAL_USE_LABELS, type Alert, type DoseEvent, type ExposureReport, type Medication, type Severity } from "@/lib/types";
 import { EVIDENCE_LABEL, SEVERITY_META, fmtDate, fmtTime, scheduleLabel } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
 import { pharmacistQuestions } from "@/lib/questions";
@@ -125,6 +125,20 @@ function ReportInner() {
                       <span className="text-slate-500">
                         {m.verified ? `DIN ${m.din}` : "Unverified entry — not safety-checked"}
                       </span>
+                      {m.actual_use && m.actual_use !== "taking" && (
+                        <>
+                          <br />
+                          <span className="font-semibold text-amber-700">
+                            Patient-reported: {ACTUAL_USE_LABELS[m.actual_use]}
+                          </span>
+                        </>
+                      )}
+                      {m.patient_notes && (
+                        <>
+                          <br />
+                          <span className="italic text-amber-700">“{m.patient_notes}”</span>
+                        </>
+                      )}
                     </td>
                     <td className="border-b border-slate-100 py-1.5 pr-2">
                       {m.ingredients.length

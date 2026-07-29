@@ -3,7 +3,9 @@
 Honest state tracking: everything in this file is **not implemented**. The
 hardening branch completed Phases 1–4 and 9 of the audit plan (alert
 lifecycle, DPD integrity, auth linking, patient-controlled consent + audit,
-exposure honesty) plus CI. These remain, in recommended order.
+exposure honesty) plus CI; the invitations branch completed Phase 6 and the
+actual-use/patient-notes slice of Phase 7. These remain, in recommended
+order.
 
 ## Phase 5 — Pharmacy organization model
 - Tables: `organizations`, `organization_locations`, `organization_members`
@@ -17,20 +19,16 @@ exposure honesty) plus CI. These remain, in recommended order.
 - Label professional accounts "unverified" until a real verification process
   exists.
 
-## Phase 6 — Pharmacy-initiated invitations and guided intake
-- `patient_invitations`: token hash (never the raw token), purpose, location,
-  expiry, status timeline (created → opened → intake started → submitted →
-  consented → reviewed / expired / cancelled).
-- Copyable secure link + QR URL (no email/SMS until a provider is configured).
-- Guided intake wizard: sign in/up → see who's asking and why → consent →
-  add meds (Rx / OTC / supplements with unverified warnings) → dose,
-  schedule, actual-use status (taking / prescribed-not-taking / taking
-  differently / recently stopped / unsure) → notes → review → submit.
-- Invitation tokens: cryptographically random, stored hashed, expiring,
-  single-consumption.
+## Phase 6 — DONE (see README "Invitations & guided intake")
+Remaining slice deferred to Phase 5: invitations carry an
+`organization_id`/location once orgs exist; today they are scoped to the
+individual clinician account. Email/SMS delivery stays out until a provider
+is configured — links are handed over in person/printed/QR.
 
 ## Phase 7 — Medication editing and provenance
-- PATCH for dose/unit/schedule/PRN/instructions/dates/actual-use status/notes.
+- DONE early (with Phase 6): `actual_use` status + `patient_notes` columns,
+  patient-only PATCH, amber badges in med list/report, intake editor.
+- PATCH for dose/unit/schedule/PRN/instructions/dates.
 - Verified DPD identity is immutable — product replacement is an explicit
   replace action (delete+add semantics with history retained).
 - Provenance enum: patient-reported / imported / pharmacy-confirmed /

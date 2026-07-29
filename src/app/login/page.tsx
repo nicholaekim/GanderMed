@@ -57,6 +57,10 @@ function LoginInner() {
   const [showGoogleSetup, setShowGoogleSetup] = useState(false);
 
   const oauthError = searchParams.get("error");
+  // Same-app paths only (an intake link, typically); anything else is dropped.
+  const rawNext = searchParams.get("next");
+  const nextPath =
+    rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") && !rawNext.includes("\\") ? rawNext : null;
 
   useEffect(() => {
     fetch("/api/auth/providers")
@@ -69,7 +73,7 @@ function LoginInner() {
   }, [oauthError]);
 
   function goHome(user: Me) {
-    router.replace(user.role === "clinician" ? "/clinic" : "/");
+    router.replace(nextPath ?? (user.role === "clinician" ? "/clinic" : "/"));
   }
 
   function startGoogle() {
@@ -79,6 +83,7 @@ function LoginInner() {
     }
     const qs = new URLSearchParams({ role });
     if (role === "clinician" && clinicName.trim()) qs.set("clinic_name", clinicName.trim());
+    if (nextPath) qs.set("next", nextPath);
     window.location.href = `/api/auth/google?${qs.toString()}`;
   }
 
@@ -133,6 +138,13 @@ function LoginInner() {
       <p className="mt-1 text-center text-sm text-slate-500">
         Take a gander at your meds — Canadian medication safety for patients and their care teams.
       </p>
+
+      {nextPath?.startsWith("/intake/") && (
+        <p className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+          Your pharmacy invited you to set up your medication list. Sign in — or create a patient
+          account — and we&apos;ll take you right back to the intake.
+        </p>
+      )}
 
       {oauthError && OAUTH_ERRORS[oauthError] && (
         <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">

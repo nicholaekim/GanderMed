@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Medication } from "@/lib/types";
+import { ACTUAL_USE_LABELS, type Medication } from "@/lib/types";
 import { titleCase } from "@/lib/normalize";
 import { fmtDate, scheduleLabel } from "@/lib/format";
 
@@ -39,6 +39,14 @@ function MedCard({
               </span>
             )}
             {med.company_name && <span className="truncate">{titleCase(med.company_name)}</span>}
+            {med.actual_use && med.actual_use !== "taking" && (
+              <span
+                className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800"
+                title="Patient-reported — worth confirming at the next review"
+              >
+                {ACTUAL_USE_LABELS[med.actual_use]}
+              </span>
+            )}
           </div>
         </div>
         {!readOnly && (
@@ -89,6 +97,9 @@ function MedCard({
         {scheduleLabel(med.is_prn, med.schedule_times)}
       </p>
       {med.instructions && <p className="mt-1 text-xs italic text-slate-500">{med.instructions}</p>}
+      {med.patient_notes && (
+        <p className="mt-1 text-xs italic text-amber-700">Patient note: {med.patient_notes}</p>
+      )}
       <p className="mt-1 text-[11px] text-slate-400">
         {stopped
           ? `Stopped ${fmtDate(med.end_date)}`

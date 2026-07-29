@@ -23,6 +23,14 @@ export interface OauthStatePayload {
   nonce: string;
   role: "patient" | "clinician";
   clinic_name: string | null;
+  /** In-app path to land on after sign-in (e.g. an intake link). */
+  next?: string | null;
+}
+
+/** Only same-app paths may ride through auth redirects — no absolute/protocol-relative URLs. */
+export function sanitizeNextPath(value: string | null | undefined): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
+  return value.length <= 300 ? value : null;
 }
 
 export function encodeStateCookie(payload: OauthStatePayload): string {
@@ -45,6 +53,7 @@ export function readStateCookie(request: Request): OauthStatePayload | null {
       nonce: parsed.nonce,
       role: parsed.role === "clinician" ? "clinician" : "patient",
       clinic_name: typeof parsed.clinic_name === "string" && parsed.clinic_name.trim() ? parsed.clinic_name.trim() : null,
+      next: sanitizeNextPath(typeof parsed.next === "string" ? parsed.next : null),
     };
   } catch {
     return null;

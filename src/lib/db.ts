@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS medications (
   end_date TEXT,
   instructions TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','stopped')),
+  actual_use TEXT NOT NULL DEFAULT 'taking' CHECK (actual_use IN
+    ('taking','not_taking','taking_differently','recently_stopped','unsure')),
+  patient_notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -102,6 +105,27 @@ CREATE TABLE IF NOT EXISTS care_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (clinician_user_id, profile_id)
 );
+
+CREATE TABLE IF NOT EXISTS patient_invitations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  clinician_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organization_id INTEGER,
+  patient_label TEXT,
+  purpose TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'created' CHECK (status IN
+    ('created','opened','intake_started','intake_submitted','consented','denied','reviewed','expired','cancelled')),
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  opened_at TEXT,
+  intake_started_at TEXT,
+  submitted_at TEXT,
+  consented_at TEXT,
+  patient_note TEXT,
+  profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
+  grant_id INTEGER REFERENCES access_grants(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invites_clinician ON patient_invitations(clinician_user_id, created_at);
 
 CREATE TABLE IF NOT EXISTS access_grants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,6 +288,19 @@ function migrateColumns(db: DatabaseSync) {
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_sub)");
   try {
     db.exec("ALTER TABLE users ADD COLUMN email_verified_at TEXT");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec(
+      `ALTER TABLE medications ADD COLUMN actual_use TEXT NOT NULL DEFAULT 'taking' CHECK (actual_use IN
+       ('taking','not_taking','taking_differently','recently_stopped','unsure'))`
+    );
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE medications ADD COLUMN patient_notes TEXT");
   } catch {
     // column already exists
   }

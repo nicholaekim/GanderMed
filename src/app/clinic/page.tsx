@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { Me, PendingRequest, RosterEntry } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
+import InvitationsPanel from "@/components/InvitationsPanel";
 
 const PURPOSES = ["Medication review", "MedsCheck preparation", "Post-discharge reconciliation", "Other"];
 
@@ -159,6 +160,8 @@ export default function ClinicPage() {
           </div>
         )}
       </section>
+
+      <InvitationsPanel onRosterChanged={loadRoster} />
 
       <section className="mt-6">
         <h2 className="mb-2 text-base font-semibold">Patients ({roster.length})</h2>
