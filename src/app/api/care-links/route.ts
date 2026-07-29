@@ -10,6 +10,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { normalizeShareCode } from "@/lib/auth";
 import { recomputeAlerts } from "@/lib/conflicts";
 import { attachReviews } from "@/lib/reviews";
+import { computeAdherence } from "@/lib/adherence";
 import { ACCESS_PURPOSES, requestAccessByCode, sweepExpiry } from "@/lib/access";
 import type { GrantRow } from "@/lib/access";
 
@@ -58,7 +59,10 @@ export async function GET(request: Request) {
          JOIN medications m ON m.id = de.medication_id WHERE m.profile_id = ?`
       )
       .get(g.profile_id) as { last: string | null };
+    const adherence = computeAdherence(db, g.profile_id, 14);
     roster.push({
+      adherence_pct: adherence.overall.adherence_pct,
+      missed_14d: adherence.overall.counts.missed,
       grant_id: g.id,
       profile_id: g.profile_id,
       patient_name: g.patient_name,

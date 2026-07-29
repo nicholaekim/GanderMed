@@ -4,6 +4,7 @@ import { getMedicationsWithIngredients, recomputeAlerts } from "@/lib/conflicts"
 import { annotateAlertsWithExposure, computeExposure } from "@/lib/exposure";
 import { attachReviews } from "@/lib/reviews";
 import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
+import { localDateTimeStr, recordScheduleChange } from "@/lib/adherence";
 import type { Medication } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -127,10 +128,13 @@ export async function PATCH(request: Request, ctx: Ctx) {
   // PRN and schedule are validated together: PRN medications carry no
   // schedule, and schedule times must be well-formed HH:MM.
   const wantsPrn = body.is_prn !== undefined ? !!body.is_prn : current.is_prn === 1;
+  let newPrnVal = current.is_prn;
+  let newTimesVal = current.schedule_times;
   if (body.is_prn !== undefined) {
+    newPrnVal = wantsPrn ? 1 : 0;
     sets.push("is_prn = ?");
-    args.push(wantsPrn ? 1 : 0);
-    if ((wantsPrn ? 1 : 0) !== current.is_prn) materialChange = true;
+    args.push(newPrnVal);
+    if (newPrnVal !== current.is_prn) materialChange = true;
   }
   if (body.schedule_times !== undefined || body.is_prn !== undefined) {
     let times: string[];
@@ -144,11 +148,12 @@ export async function PATCH(request: Request, ctx: Ctx) {
     } else {
       times = JSON.parse(current.schedule_times) as string[];
     }
-    const encoded = JSON.stringify(times);
+    newTimesVal = JSON.stringify(times);
     sets.push("schedule_times = ?");
-    args.push(encoded);
-    if (encoded !== current.schedule_times) materialChange = true;
+    args.push(newTimesVal);
+    if (newTimesVal !== current.schedule_times) materialChange = true;
   }
+  const scheduleChanged = newPrnVal !== current.is_prn || newTimesVal !== current.schedule_times;
 
   if (body.start_date !== undefined) {
     if (body.start_date !== null && (typeof body.start_date !== "string" || !DATE_RE.test(body.start_date))) {
@@ -174,6 +179,17 @@ export async function PATCH(request: Request, ctx: Ctx) {
   }
 
   db.prepare(`UPDATE medications SET ${sets.join(", ")} WHERE id = ? AND profile_id = ?`).run(...args, medId, profileId);
+
+  // Adherence must judge past dates by the schedule that was in effect then.
+  if (scheduleChanged) {
+    recordScheduleChange(
+      db,
+      medId,
+      { is_prn: current.is_prn, schedule_times: current.schedule_times },
+      { is_prn: newPrnVal, schedule_times: newTimesVal },
+      localDateTimeStr(new Date())
+    );
+  }
 
   const { all } = recomputeAlerts(db, profileId);
   return NextResponse.json({

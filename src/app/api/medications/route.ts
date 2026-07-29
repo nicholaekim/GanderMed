@@ -7,6 +7,7 @@ import { attachReviews } from "@/lib/reviews";
 import { logAudit } from "@/lib/access";
 import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
 import { canonicalIngredient, detectExtendedRelease } from "@/lib/normalize";
+import { recordInitialSchedule } from "@/lib/adherence";
 import type { AddMedicationPayload } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -108,6 +109,7 @@ export async function POST(request: Request) {
         body.instructions?.trim() || null
       );
     medId = Number(info.lastInsertRowid);
+    recordInitialSchedule(db, medId, body.is_prn ? 1 : 0, JSON.stringify(scheduleTimes));
 
     if (verified) {
       const ins = db.prepare(

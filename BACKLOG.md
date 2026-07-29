@@ -7,7 +7,15 @@ exposure honesty) plus CI; the invitations branch completed Phase 6 and the
 actual-use/patient-notes slice of Phase 7. These remain, in recommended
 order.
 
-## Phase 5 — Pharmacy organization model
+## Phase 5 — Pharmacy organization model (designed, NOT implemented)
+A full implementation blueprint exists at
+`design/phase5-organizations-blueprint.json` (judge-panel output: exact DDL,
+resolveProfileAccess org branch, staff-invite lifecycle, roster dedupe,
+consent copy, 30+ decision log, test plan). Highlights to honor: client
+never supplies organization_id (derived from active membership),
+deactivation bites on next read, org-scoped invitations fail closed when
+the minter loses membership, and the alert-reviews route's inline grant
+check must gain the org branch (it bypasses resolveProfileAccess today).
 - Tables: `organizations`, `organization_locations`, `organization_members`
   (roles: owner/admin, pharmacist, staff), staff invitations.
   (`access_grants.organization_id` already exists and is nullable for this.)
@@ -33,14 +41,12 @@ tested review-invalidation rule (reviews survive dose edits but carry a
 for later phases: setting pharmacy-confirmed provenance is a Phase 10
 reconciliation disposition.
 
-## Phase 8 — Real adherence
-- Deterministic expected-slot generation (schedule × start/end dates × window
-  × timezone), slot matching, statuses: taken-on-time / late / skipped /
-  missed / future. PRN never "missed". Distinguish "no data" from 0%.
-- Handle mid-window schedule changes and duplicate logs; document the
-  percentage formula. Update patient UI, clinic UI, report.
-- Test matrix: no logs, on time, late, skipped, missed, future, PRN, partial
-  windows, DST boundaries, schedule changes.
+## Phase 8 — DONE (see CLAUDE.md "Adherence engine")
+Expected slots from per-date schedule history, on_time/late/skipped/missed/
+future, PRN never missed, documented formula with null-not-zero "no data",
+12-case test matrix incl. mid-window schedule change and DST-safe iteration.
+Remaining niceties for later: per-slot drill-down UI, configurable grace
+window, timezone per profile (currently single-local-TZ, documented).
 
 ## Phase 9 (remainder) — Temporal rule semantics
 - Statuses landed (overlap / no_overlap / insufficient_data / unknown), but

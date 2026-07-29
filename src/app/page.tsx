@@ -12,7 +12,9 @@ import ExposurePanel from "@/components/ExposurePanel";
 import TodaySchedule from "@/components/TodaySchedule";
 import MedicationList from "@/components/MedicationList";
 import HistoryList from "@/components/HistoryList";
+import { pctBadgeClass } from "@/components/AdherenceCard";
 import { RULESET_VERSION } from "@/data/interactionRules";
+import type { AdherenceReport } from "@/lib/adherence";
 
 type Banner = { tone: "warn" | "ok"; text: string } | null;
 
@@ -23,20 +25,23 @@ export default function Dashboard() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [events, setEvents] = useState<DoseEvent[]>([]);
   const [exposure, setExposure] = useState<ExposureReport | null>(null);
+  const [adherence, setAdherence] = useState<AdherenceReport | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
 
   const loadAll = useCallback(async () => {
-    const [mRes, aRes, eRes, xRes] = await Promise.all([
+    const [mRes, aRes, eRes, xRes, adRes] = await Promise.all([
       fetch("/api/medications"),
       fetch("/api/alerts"),
       fetch("/api/dose-events?days=14"),
       fetch("/api/exposure"),
+      fetch("/api/adherence?days=14"),
     ]);
     if (mRes.ok) setMeds((await mRes.json()).medications ?? []);
     if (aRes.ok) setAlerts((await aRes.json()).alerts ?? []);
     if (eRes.ok) setEvents((await eRes.json()).events ?? []);
     if (xRes.ok) setExposure((await xRes.json()).exposure ?? null);
+    if (adRes.ok) setAdherence((await adRes.json()).adherence ?? null);
     setLoaded(true);
   }, []);
 
@@ -62,16 +67,19 @@ export default function Dashboard() {
     router.replace("/login");
   }
 
-  // Dose logs change events AND time-derived state (exposure, alert overlap tags).
+  // Dose logs change events AND time-derived state (exposure, alert overlap
+  // tags, adherence).
   const refreshEvents = useCallback(async () => {
-    const [eRes, xRes, aRes] = await Promise.all([
+    const [eRes, xRes, aRes, adRes] = await Promise.all([
       fetch("/api/dose-events?days=14"),
       fetch("/api/exposure"),
       fetch("/api/alerts"),
+      fetch("/api/adherence?days=14"),
     ]);
     if (eRes.ok) setEvents((await eRes.json()).events ?? []);
     if (xRes.ok) setExposure((await xRes.json()).exposure ?? null);
     if (aRes.ok) setAlerts((await aRes.json()).alerts ?? []);
+    if (adRes.ok) setAdherence((await adRes.json()).adherence ?? null);
   }, []);
 
   function handleAdded(res: AddResult) {
@@ -233,6 +241,24 @@ export default function Dashboard() {
               onDelete={deleteMed}
               onChanged={loadAll}
             />
+            {adherence && adherence.overall.expected_due > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-600">
+                <span className={`rounded-full px-2 py-0.5 font-bold ${pctBadgeClass(adherence.overall.adherence_pct)}`}>
+                  {adherence.overall.adherence_pct}%
+                </span>
+                <span>
+                  14-day adherence · {adherence.overall.counts.on_time} on time · {adherence.overall.counts.late} late
+                  {adherence.overall.counts.skipped > 0 && ` · ${adherence.overall.counts.skipped} skipped`}
+                  {adherence.overall.counts.missed > 0 && (
+                    <span className="font-semibold text-red-600"> · {adherence.overall.counts.missed} missed</span>
+                  )}
+                  {" · "}
+                  <a href="/report" className="underline hover:text-slate-800">
+                    details
+                  </a>
+                </span>
+              </div>
+            )}
             <HistoryList events={events} />
           </div>
         </div>

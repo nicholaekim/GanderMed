@@ -110,6 +110,16 @@ CREATE TABLE IF NOT EXISTS care_links (
   UNIQUE (clinician_user_id, profile_id)
 );
 
+CREATE TABLE IF NOT EXISTS medication_schedule_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+  is_prn INTEGER NOT NULL,
+  schedule_times TEXT NOT NULL,
+  effective_from TEXT NOT NULL,
+  effective_to TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_schedhist_med ON medication_schedule_history(medication_id, effective_from);
+
 CREATE TABLE IF NOT EXISTS patient_invitations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   token_hash TEXT NOT NULL UNIQUE,
@@ -329,6 +339,15 @@ function migrateColumns(db: DatabaseSync) {
   } catch {
     // column already exists
   }
+  // Adherence needs to know what the schedule WAS on each past date. Meds
+  // that predate the history table get one open-ended row from their current
+  // values ('1970-…' = "as long as we've known"); schedule edits from now on
+  // close and reopen rows via recordScheduleChange.
+  db.exec(
+    `INSERT INTO medication_schedule_history (medication_id, is_prn, schedule_times, effective_from)
+     SELECT m.id, m.is_prn, m.schedule_times, '1970-01-01T00:00' FROM medications m
+     WHERE NOT EXISTS (SELECT 1 FROM medication_schedule_history h WHERE h.medication_id = m.id)`
+  );
   // Existing rows get real values on the next seedIngredientProfiles run —
   // the EXPOSURE_VERSION bump forces a full reseed.
   try {

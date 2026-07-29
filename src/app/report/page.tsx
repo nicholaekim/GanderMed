@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ACTUAL_USE_LABELS, PROVENANCE_LABELS, type Alert, type DoseEvent, type ExposureReport, type Medication, type Severity } from "@/lib/types";
+import type { AdherenceReport } from "@/lib/adherence";
 import { EVIDENCE_LABEL, SEVERITY_META, fmtDate, fmtTime, scheduleLabel } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
 import { pharmacistQuestions } from "@/lib/questions";
@@ -34,17 +35,19 @@ function ReportInner() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [events, setEvents] = useState<DoseEvent[]>([]);
   const [exposure, setExposure] = useState<ExposureReport | null>(null);
+  const [adherence, setAdherence] = useState<AdherenceReport | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
       const qs = patientParam ? `?patient=${patientParam}` : "";
       const eventsQs = patientParam ? `?patient=${patientParam}&days=14` : "?days=14";
-      const [mRes, aRes, eRes, xRes] = await Promise.all([
+      const [mRes, aRes, eRes, xRes, adRes] = await Promise.all([
         fetch(`/api/medications${qs}`),
         fetch(`/api/alerts${qs}`),
         fetch(`/api/dose-events${eventsQs}`),
         fetch(`/api/exposure${qs}`),
+        fetch(`/api/adherence${eventsQs}`),
       ]);
       if (mRes.status === 401) {
         router.replace("/login");
@@ -58,18 +61,13 @@ function ReportInner() {
       if (aRes.ok) setAlerts((await aRes.json()).alerts ?? []);
       if (eRes.ok) setEvents((await eRes.json()).events ?? []);
       if (xRes.ok) setExposure((await xRes.json()).exposure ?? null);
+      if (adRes.ok) setAdherence((await adRes.json()).adherence ?? null);
       setLoaded(true);
     })();
   }, [patientParam, router]);
 
   const active = meds.filter((m) => m.status === "active");
   const stopped = meds.filter((m) => m.status === "stopped");
-
-  const adherence = new Map<number, { taken: number; late: number; skipped: number }>();
-  for (const e of events) {
-    if (!adherence.has(e.medication_id)) adherence.set(e.medication_id, { taken: 0, late: 0, skipped: 0 });
-    adherence.get(e.medication_id)![e.status]++;
-  }
 
   return (
     <div className="mx-auto max-w-3xl bg-white px-8 py-8 text-slate-900 print:px-0">
@@ -270,22 +268,63 @@ function ReportInner() {
           )}
 
           <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
-            Dose log — last 14 days
+            Adherence — last {adherence?.window_days ?? 14} days
           </h2>
-          {adherence.size === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">No doses logged.</p>
+          {!adherence || adherence.per_med.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">
+              No scheduled doses were due and no doses were logged in this window.
+            </p>
           ) : (
-            <ul className="mt-2 space-y-1 text-xs">
-              {[...adherence.entries()].map(([medId, counts]) => {
-                const med = meds.find((m) => m.id === medId);
-                return (
-                  <li key={medId}>
-                    <span className="font-semibold">{titleCase(med?.brand_name ?? `#${medId}`)}</span>:{" "}
-                    {counts.taken} taken on time, {counts.late} late, {counts.skipped} skipped
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <table className="mt-2 w-full border-collapse text-xs">
+                <thead>
+                  <tr className="text-left text-slate-500">
+                    <th className="border-b border-slate-200 py-1 pr-2 font-semibold">Medication</th>
+                    <th className="border-b border-slate-200 py-1 pr-2 font-semibold">Expected</th>
+                    <th className="border-b border-slate-200 py-1 pr-2 font-semibold">On time</th>
+                    <th className="border-b border-slate-200 py-1 pr-2 font-semibold">Late</th>
+                    <th className="border-b border-slate-200 py-1 pr-2 font-semibold">Skipped</th>
+                    <th className="border-b border-slate-200 py-1 pr-2 font-semibold">Missed</th>
+                    <th className="border-b border-slate-200 py-1 font-semibold">Adherence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adherence.per_med.map((m) => (
+                    <tr key={m.medication_id}>
+                      <td className="border-b border-slate-100 py-1 pr-2 font-semibold">
+                        {titleCase(m.brand_name)}
+                        {m.is_prn ? " (as needed)" : ""}
+                        {m.med_status === "stopped" ? " (stopped)" : ""}
+                      </td>
+                      {m.is_prn ? (
+                        <td colSpan={5} className="border-b border-slate-100 py-1 pr-2 text-slate-500">
+                          {m.unscheduled_doses} dose{m.unscheduled_doses === 1 ? "" : "s"} taken as needed — PRN
+                          medications have no expected schedule
+                        </td>
+                      ) : (
+                        <>
+                          <td className="border-b border-slate-100 py-1 pr-2">{m.expected_due}</td>
+                          <td className="border-b border-slate-100 py-1 pr-2">{m.counts.on_time}</td>
+                          <td className="border-b border-slate-100 py-1 pr-2">{m.counts.late}</td>
+                          <td className="border-b border-slate-100 py-1 pr-2">{m.counts.skipped}</td>
+                          <td className={`border-b border-slate-100 py-1 pr-2 ${m.counts.missed > 0 ? "font-bold text-red-700" : ""}`}>
+                            {m.counts.missed}
+                          </td>
+                        </>
+                      )}
+                      <td className="border-b border-slate-100 py-1 font-semibold">
+                        {m.is_prn ? "—" : m.adherence_pct === null ? "no data" : `${m.adherence_pct}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-1.5 text-[10px] text-slate-400">
+                Overall: {adherence.overall.adherence_pct === null ? "no data" : `${adherence.overall.adherence_pct}%`} ·
+                Formula: {adherence.formula} &ldquo;Missed&rdquo; = nothing logged and more than an hour past the
+                scheduled time at generation; doses logged later update the report.
+              </p>
+            </>
           )}
 
           <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">

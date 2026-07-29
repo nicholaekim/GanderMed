@@ -13,6 +13,7 @@ import { annotateAlertsWithExposure, computeExposure } from "@/lib/exposure";
 import { attachReviews } from "@/lib/reviews";
 import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
 import { canonicalIngredient, detectExtendedRelease } from "@/lib/normalize";
+import { recordInitialSchedule } from "@/lib/adherence";
 import type { Medication } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -95,6 +96,7 @@ export async function POST(request: Request, ctx: Ctx) {
         old.patient_notes
       );
     newId = Number(info.lastInsertRowid);
+    recordInitialSchedule(db, newId, old.is_prn, old.schedule_times);
 
     const ins = db.prepare(
       `INSERT INTO medication_ingredients (medication_id, ingredient_name, canonical_name, strength, strength_unit)

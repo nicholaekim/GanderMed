@@ -189,6 +189,24 @@ export default function ClinicPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      r.adherence_pct === null
+                        ? "bg-slate-100 text-slate-500"
+                        : r.adherence_pct >= 90
+                          ? "bg-emerald-100 text-emerald-700"
+                          : r.adherence_pct >= 70
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-red-100 text-red-800"
+                    }`}
+                    title={
+                      r.adherence_pct === null
+                        ? "No scheduled doses were due in the last 14 days"
+                        : `14-day adherence · ${r.missed_14d} missed`
+                    }
+                  >
+                    {r.adherence_pct === null ? "no dose data" : `${r.adherence_pct}% adherence`}
+                  </span>
                   {r.alerts_major > 0 && (
                     <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-800">
                       {r.alerts_major} major

@@ -174,6 +174,9 @@ export interface RosterEntry {
   alerts_reviewed: number;
   alerts_acknowledged: number;
   last_dose_at: string | null;
+  /** Overall 14-day adherence; null = no scheduled doses were due ("no data", never 0%). */
+  adherence_pct: number | null;
+  missed_14d: number;
 }
 
 export interface PendingRequest {
