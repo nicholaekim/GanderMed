@@ -46,7 +46,7 @@ export interface DoseEvent {
 
 export type AlertKind = "interaction" | "duplicate";
 
-export type ExposureStatus = "overlap" | "no_overlap" | "unknown";
+export type ExposureStatus = "overlap" | "no_overlap" | "insufficient_data" | "unknown";
 
 export interface Alert {
   id: number;
@@ -121,10 +121,12 @@ export interface Me {
 }
 
 export interface RosterEntry {
-  link_id: number;
+  grant_id: number;
   profile_id: number;
   patient_name: string;
   patient_email: string | null;
+  purpose: string | null;
+  expires_at: string | null;
   active_medications: number;
   alerts_major: number;
   alerts_moderate: number;
@@ -132,6 +134,33 @@ export interface RosterEntry {
   alerts_reviewed: number;
   alerts_acknowledged: number;
   last_dose_at: string | null;
+}
+
+export interface PendingRequest {
+  grant_id: number;
+  patient_name: string;
+  purpose: string | null;
+  requested_at: string;
+}
+
+export interface AccessGrantView {
+  id: number;
+  status: "pending" | "active" | "denied" | "revoked" | "expired";
+  purpose: string | null;
+  requested_at: string;
+  decided_at: string | null;
+  starts_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  clinician_name: string;
+  clinic_name: string | null;
+}
+
+export interface AuditEventView {
+  at: string;
+  action: string;
+  actor_name: string | null;
+  actor_clinic: string | null;
 }
 
 export interface SearchResult {

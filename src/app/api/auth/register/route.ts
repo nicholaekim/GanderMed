@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { createSession, ensurePatientProfile, getUserFromRequest, hashPassword } from "@/lib/auth";
+import { allowRequest, clientIp } from "@/lib/ratelimit";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
+  if (!allowRequest(`register:${clientIp(request)}`, 20, 60 * 60_000)) {
+    return NextResponse.json({ error: "Too many attempts — try again later." }, { status: 429 });
+  }
   let body: {
     email?: string;
     password?: string;

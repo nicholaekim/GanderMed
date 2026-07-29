@@ -3,22 +3,30 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { Me, RosterEntry } from "@/lib/types";
-import { fmtDateTime } from "@/lib/format";
+import type { Me, PendingRequest, RosterEntry } from "@/lib/types";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
+
+const PURPOSES = ["Medication review", "MedsCheck preparation", "Post-discharge reconciliation", "Other"];
 
 export default function ClinicPage() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [pending, setPending] = useState<PendingRequest[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [code, setCode] = useState("");
+  const [purpose, setPurpose] = useState(PURPOSES[0]);
   const [linkMsg, setLinkMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const loadRoster = useCallback(async () => {
     const res = await fetch("/api/care-links");
-    if (res.ok) setRoster((await res.json()).roster ?? []);
+    if (res.ok) {
+      const data = await res.json();
+      setRoster(data.roster ?? []);
+      setPending(data.pending ?? []);
+    }
     setLoaded(true);
   }, []);
 
@@ -47,13 +55,16 @@ export default function ClinicPage() {
       const res = await fetch("/api/care-links", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, purpose }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setLinkMsg({ ok: false, text: data.error ?? "Could not link patient." });
+        setLinkMsg({ ok: false, text: data.error ?? "Could not send the request." });
       } else {
-        setLinkMsg({ ok: true, text: `${titleCase(data.patient_name)} added to your patient list.` });
+        setLinkMsg({
+          ok: true,
+          text: `Request sent to ${titleCase(data.patient_name)} — they'll see it on their dashboard and must approve it before you can view anything.`,
+        });
         setCode("");
         loadRoster();
       }
@@ -62,9 +73,12 @@ export default function ClinicPage() {
     }
   }
 
-  async function unlink(linkId: number, name: string) {
-    if (!window.confirm(`Remove ${name} from your patient list? (Their data is not deleted.)`)) return;
-    const res = await fetch(`/api/care-links/${linkId}`, { method: "DELETE" });
+  async function unlink(grantId: number, name: string, isPending: boolean) {
+    const msg = isPending
+      ? `Withdraw the pending request for ${name}?`
+      : `Give up access to ${name}? (Their data is not deleted; they'd have to approve a new request.)`;
+    if (!window.confirm(msg)) return;
+    const res = await fetch(`/api/care-links/${grantId}`, { method: "DELETE" });
     if (res.ok) loadRoster();
   }
 
@@ -93,27 +107,56 @@ export default function ClinicPage() {
       </header>
 
       <section className="mt-6 rounded-2xl border border-teal-200 bg-teal-50/60 p-5">
-        <h2 className="text-sm font-semibold">Add a patient</h2>
+        <h2 className="text-sm font-semibold">Request access to a patient</h2>
         <p className="mt-0.5 text-xs text-slate-600">
-          Ask the patient for the care code shown on their dashboard — entering it is their consent
-          for you to view their record.
+          Ask the patient for the care code on their dashboard. Entering it sends them an access
+          request — <strong>they must approve it</strong> before you can see anything.
         </p>
-        <form onSubmit={addPatient} className="mt-3 flex gap-2">
+        <form onSubmit={addPatient} className="mt-3 flex flex-wrap gap-2">
           <input
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="e.g. MAPL-4821"
             className="w-44 rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase tracking-widest outline-none focus:border-teal-400"
           />
+          <select
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
+          >
+            {PURPOSES.map((p) => (
+              <option key={p}>{p}</option>
+            ))}
+          </select>
           <button
             disabled={busy || code.trim().length < 8}
             className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
           >
-            Link patient
+            Send request
           </button>
         </form>
         {linkMsg && (
           <p className={`mt-2 text-xs ${linkMsg.ok ? "text-emerald-700" : "text-red-600"}`}>{linkMsg.text}</p>
+        )}
+        {pending.length > 0 && (
+          <div className="mt-3 border-t border-teal-200/60 pt-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Awaiting patient approval</p>
+            <ul className="mt-1 space-y-1">
+              {pending.map((p) => (
+                <li key={p.grant_id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                  <span>
+                    {titleCase(p.patient_name)} · {p.purpose ?? "no purpose"} · sent {fmtDate(p.requested_at)}
+                  </span>
+                  <button
+                    onClick={() => unlink(p.grant_id, titleCase(p.patient_name), true)}
+                    className="text-[11px] text-slate-400 underline hover:text-red-500"
+                  >
+                    withdraw
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </section>
 
@@ -129,7 +172,7 @@ export default function ClinicPage() {
           <div className="space-y-2">
             {roster.map((r) => (
               <div
-                key={r.link_id}
+                key={r.grant_id}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4"
               >
                 <div className="min-w-0">
@@ -138,6 +181,8 @@ export default function ClinicPage() {
                     {r.patient_email ?? "no account email"} · {r.active_medications} active med
                     {r.active_medications === 1 ? "" : "s"} · last dose{" "}
                     {r.last_dose_at ? fmtDateTime(r.last_dose_at) : "never"}
+                    {r.purpose ? ` · ${r.purpose}` : ""}
+                    {r.expires_at ? ` · access expires ${fmtDate(r.expires_at)}` : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -168,7 +213,7 @@ export default function ClinicPage() {
                     Open record
                   </Link>
                   <button
-                    onClick={() => unlink(r.link_id, titleCase(r.patient_name))}
+                    onClick={() => unlink(r.grant_id, titleCase(r.patient_name), false)}
                     className="text-xs text-slate-400 underline hover:text-red-500"
                   >
                     remove

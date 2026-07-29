@@ -1,10 +1,18 @@
+// Care-team access endpoints (path kept from the care-link era; semantics
+// are now request/consent based). POST creates a PENDING access request from
+// a patient's care code — the patient must approve it before any record
+// becomes readable. GET returns the clinician's roster: active grants with
+// safety stats, plus their pending/awaiting-approval requests.
+
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { getUserFromRequest, normalizeShareCode } from "@/lib/auth";
+import { getUserFromRequest } from "@/lib/auth";
+import { normalizeShareCode } from "@/lib/auth";
 import { recomputeAlerts } from "@/lib/conflicts";
 import { attachReviews } from "@/lib/reviews";
+import { ACCESS_PURPOSES, requestAccessByCode, sweepExpiry } from "@/lib/access";
+import type { GrantRow } from "@/lib/access";
 
-// Clinician roster: every linked patient with at-a-glance safety stats.
 export async function GET(request: Request) {
   const db = getDb();
   const user = getUserFromRequest(db, request);
@@ -13,49 +21,63 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Care-team accounts only." }, { status: 403 });
   }
 
-  const links = db
+  const grants = db
     .prepare(
-      `SELECT cl.id AS link_id, p.id AS profile_id, p.name AS patient_name, u.email AS patient_email
-       FROM care_links cl
-       JOIN profiles p ON p.id = cl.profile_id
+      `SELECT g.*, p.name AS patient_name, u.email AS patient_email
+       FROM access_grants g
+       JOIN profiles p ON p.id = g.profile_id
        LEFT JOIN users u ON u.id = p.user_id
-       WHERE cl.clinician_user_id = ?
+       WHERE g.clinician_user_id = ? AND g.status IN ('pending','active')
        ORDER BY p.name`
     )
-    .all(user.id) as unknown as { link_id: number; profile_id: number; patient_name: string; patient_email: string | null }[];
+    .all(user.id) as unknown as (GrantRow & { patient_name: string; patient_email: string | null })[];
 
-  const roster = links.map((l) => {
-    const { all } = recomputeAlerts(db, l.profile_id);
-    attachReviews(db, l.profile_id, all);
-    // "Open" = needs attention: neither acknowledged by the patient nor
-    // covered by an active clinician review.
-    const unacked = all.filter((a) => !a.acknowledged_at && !a.review);
-    const reviewed = all.filter((a) => a.review && !a.acknowledged_at);
+  const pending = [];
+  const roster = [];
+  for (const g of grants) {
+    if (sweepExpiry(db, g) !== "active") {
+      if (g.status === "pending") {
+        pending.push({
+          grant_id: g.id,
+          patient_name: g.patient_name,
+          purpose: g.purpose,
+          requested_at: g.requested_at,
+        });
+      }
+      continue;
+    }
+    const { all } = recomputeAlerts(db, g.profile_id);
+    attachReviews(db, g.profile_id, all);
+    const open = all.filter((a) => !a.acknowledged_at && !a.review);
     const activeMeds = db
       .prepare("SELECT COUNT(*) AS n FROM medications WHERE profile_id = ? AND status = 'active'")
-      .get(l.profile_id) as { n: number };
+      .get(g.profile_id) as { n: number };
     const lastEvent = db
       .prepare(
         `SELECT MAX(de.logged_at) AS last FROM dose_events de
          JOIN medications m ON m.id = de.medication_id WHERE m.profile_id = ?`
       )
-      .get(l.profile_id) as { last: string | null };
-    return {
-      ...l,
+      .get(g.profile_id) as { last: string | null };
+    roster.push({
+      grant_id: g.id,
+      profile_id: g.profile_id,
+      patient_name: g.patient_name,
+      patient_email: g.patient_email,
+      purpose: g.purpose,
+      expires_at: g.expires_at,
       active_medications: activeMeds.n,
-      alerts_major: unacked.filter((a) => a.severity === "major").length,
-      alerts_moderate: unacked.filter((a) => a.severity === "moderate").length,
-      alerts_minor: unacked.filter((a) => a.severity === "minor").length,
-      alerts_reviewed: reviewed.length,
+      alerts_major: open.filter((a) => a.severity === "major").length,
+      alerts_moderate: open.filter((a) => a.severity === "moderate").length,
+      alerts_minor: open.filter((a) => a.severity === "minor").length,
+      alerts_reviewed: all.filter((a) => a.review && !a.acknowledged_at).length,
       alerts_acknowledged: all.filter((a) => a.acknowledged_at).length,
       last_dose_at: lastEvent.last,
-    };
-  });
+    });
+  }
 
-  return NextResponse.json({ roster });
+  return NextResponse.json({ roster, pending });
 }
 
-// Link a patient to this clinician using the care code the patient shared.
 export async function POST(request: Request) {
   const db = getDb();
   const user = getUserFromRequest(db, request);
@@ -64,7 +86,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Care-team accounts only." }, { status: 403 });
   }
 
-  let body: { code?: string };
+  let body: { code?: string; purpose?: string };
   try {
     body = await request.json();
   } catch {
@@ -72,15 +94,21 @@ export async function POST(request: Request) {
   }
   const code = normalizeShareCode(body.code ?? "");
   if (!code) return NextResponse.json({ error: "Care codes look like ABCD-1234." }, { status: 400 });
+  const purpose = (ACCESS_PURPOSES as readonly string[]).includes(body.purpose ?? "")
+    ? body.purpose!
+    : "Medication review";
 
-  const profile = db
-    .prepare("SELECT id, name FROM profiles WHERE share_code = ?")
-    .get(code) as { id: number; name: string } | undefined;
-  if (!profile) return NextResponse.json({ error: "No patient found with that care code." }, { status: 404 });
-
-  db.prepare("INSERT OR IGNORE INTO care_links (clinician_user_id, profile_id) VALUES (?, ?)").run(
-    user.id,
-    profile.id
-  );
-  return NextResponse.json({ ok: true, patient_name: profile.name, profile_id: profile.id });
+  const result = requestAccessByCode(db, user.id, code, purpose);
+  if ("error" in result) {
+    if (result.error === "already_open") {
+      return NextResponse.json({ error: "You already have a pending or active request for this patient." }, { status: 409 });
+    }
+    return NextResponse.json({ error: "No patient found with that care code." }, { status: 404 });
+  }
+  return NextResponse.json({
+    ok: true,
+    status: "pending",
+    patient_name: result.patient_name,
+    grant_id: result.grant.id,
+  });
 }

@@ -73,15 +73,10 @@ export default function AddMedication({ onAdded }: { onAdded: (res: AddResult) =
     if (!readyToSave) return;
     setSaving(true);
     setSaveError(null);
+    // Verified adds send only drug_code — the server resolves everything
+    // else authoritatively from Health Canada and rejects unmarketed products.
     const payload = {
-      ...(selected
-        ? {
-            drug_code: selected.drug_code,
-            din: selected.din,
-            brand_name: selected.brand_name,
-            company_name: selected.company_name,
-          }
-        : { manual_name: manualName.trim() }),
+      ...(selected ? { drug_code: selected.drug_code } : { manual_name: manualName.trim() }),
       dose_value: doseValue === "" ? null : Number(doseValue),
       dose_unit: doseUnit,
       is_prn: isPrn,

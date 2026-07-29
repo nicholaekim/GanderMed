@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { revokeGrant } from "@/lib/access";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+// A clinician withdrawing their own request, or relinquishing granted access.
 export async function DELETE(request: Request, ctx: Ctx) {
   const { id } = await ctx.params;
-  const linkId = Number(id);
-  if (!Number.isInteger(linkId)) return NextResponse.json({ error: "Bad id." }, { status: 400 });
+  const grantId = Number(id);
+  if (!Number.isInteger(grantId)) return NextResponse.json({ error: "Bad id." }, { status: 400 });
 
   const db = getDb();
   const user = getUserFromRequest(db, request);
@@ -16,9 +18,7 @@ export async function DELETE(request: Request, ctx: Ctx) {
     return NextResponse.json({ error: "Care-team accounts only." }, { status: 403 });
   }
 
-  const info = db
-    .prepare("DELETE FROM care_links WHERE id = ? AND clinician_user_id = ?")
-    .run(linkId, user.id);
-  if (Number(info.changes) === 0) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const ok = revokeGrant(db, user.id, grantId, { clinicianUserId: user.id });
+  if (!ok) return NextResponse.json({ error: "Not found." }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

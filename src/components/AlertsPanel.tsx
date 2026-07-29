@@ -22,14 +22,24 @@ function ExposureBadge({ status }: { status?: Alert["exposure_status"] }) {
   if (status === "overlap") {
     return (
       <span className="rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800">
-        ⏱ Both estimated active now
+        ⏱ Recorded doses likely overlapping (estimate)
       </span>
     );
   }
   if (status === "no_overlap") {
     return (
-      <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
-        No overlap in recorded doses
+      <span
+        className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500"
+        title="Separating doses does not necessarily remove this interaction concern."
+      >
+        No overlap identified in recorded doses
+      </span>
+    );
+  }
+  if (status === "insufficient_data") {
+    return (
+      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">
+        Not enough logged doses to assess timing
       </span>
     );
   }

@@ -11,6 +11,8 @@
 //   server-to-server exchange (Google's documented shortcut). If tokens ever
 //   arrive via any other path, full JWKS verification becomes mandatory.
 
+import { cookieSecureSuffix } from "@/lib/auth";
+
 export const OAUTH_COOKIE = "dcai_oauth";
 
 export function googleConfigured(): boolean {
@@ -25,11 +27,11 @@ export interface OauthStatePayload {
 
 export function encodeStateCookie(payload: OauthStatePayload): string {
   const value = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  return `${OAUTH_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`;
+  return `${OAUTH_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${cookieSecureSuffix()}`;
 }
 
 export function clearStateCookie(): string {
-  return `${OAUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return `${OAUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieSecureSuffix()}`;
 }
 
 export function readStateCookie(request: Request): OauthStatePayload | null {
@@ -70,6 +72,19 @@ export interface GoogleIdentity {
   email: string;
   emailVerified: boolean;
   name: string;
+}
+
+type Exchanger = (origin: string, code: string) => Promise<GoogleIdentity>;
+
+// Swappable so auth tests can simulate Google identities without network.
+let activeExchanger: Exchanger | null = null;
+
+export function __setGoogleExchangeForTests(fn: Exchanger | null): void {
+  activeExchanger = fn;
+}
+
+export async function performExchange(origin: string, code: string): Promise<GoogleIdentity> {
+  return (activeExchanger ?? exchangeCode)(origin, code);
 }
 
 export async function exchangeCode(origin: string, code: string): Promise<GoogleIdentity> {

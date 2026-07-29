@@ -3,11 +3,78 @@
 // routes do. No mocks — the engine under test is the production engine.
 
 import type { DatabaseSync } from "node:sqlite";
+import { randomBytes } from "node:crypto";
 import { createDatabase } from "../src/lib/db";
 import { canonicalIngredient } from "../src/lib/normalize";
 
 export function freshDb(): DatabaseSync {
   return createDatabase(":memory:");
+}
+
+/**
+ * Route handlers resolve their database via getDb(), which returns the
+ * globalThis-cached instance. Pointing that cache at an in-memory database
+ * lets tests invoke real route handlers end-to-end without touching disk.
+ */
+export function useTestDb(): DatabaseSync {
+  const db = freshDb();
+  (globalThis as { __dcaiDb?: DatabaseSync }).__dcaiDb = db;
+  return db;
+}
+
+let emailCounter = 0;
+
+export function createUserSession(
+  db: DatabaseSync,
+  role: "patient" | "clinician",
+  opts: { withProfile?: boolean; verified?: boolean } = {}
+): { userId: number; profileId: number | null; cookie: string; token: string } {
+  emailCounter += 1;
+  const info = db
+    .prepare(
+      `INSERT INTO users (email, password_hash, password_salt, display_name, role, clinic_name, email_verified_at)
+       VALUES (?, 'x', 'x', ?, ?, ?, ?)`
+    )
+    .run(
+      `${role}${emailCounter}@test.local`,
+      role === "clinician" ? `Dr. Test ${emailCounter}` : `Patient ${emailCounter}`,
+      role,
+      role === "clinician" ? "Test Clinic" : null,
+      opts.verified ? new Date().toISOString() : null
+    );
+  const userId = Number(info.lastInsertRowid);
+
+  let profileId: number | null = null;
+  if (role === "patient" && opts.withProfile !== false) {
+    profileId = Number(
+      db
+        .prepare("INSERT INTO profiles (name, user_id, share_code) VALUES (?, ?, ?)")
+        .run(`Patient ${emailCounter}`, userId, `TP${String(emailCounter).padStart(2, "0")}-CODE`)
+        .lastInsertRowid
+    );
+  }
+
+  const token = randomBytes(32).toString("hex");
+  db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(
+    token,
+    userId,
+    new Date(Date.now() + 3_600_000).toISOString()
+  );
+  return { userId, profileId, cookie: `dcai_session=${token}`, token };
+}
+
+export function jsonRequest(
+  url: string,
+  opts: { method?: string; cookie?: string; body?: unknown } = {}
+): Request {
+  return new Request(`http://localhost:3000${url}`, {
+    method: opts.method ?? "GET",
+    headers: {
+      ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(opts.cookie ? { cookie: opts.cookie } : {}),
+    },
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+  });
 }
 
 let shareCounter = 0;

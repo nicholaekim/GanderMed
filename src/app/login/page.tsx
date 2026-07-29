@@ -14,6 +14,8 @@ const OAUTH_ERRORS: Record<string, string> = {
   google_unverified: "Your Google email address isn't verified, so it can't be used here.",
   google_clinic_required:
     "To create a professional account with Google, enter your clinic name below first, then try again.",
+  google_link_blocked:
+    "An account already exists for this email but hasn't been verified. Sign in with your email and password first, then click “Continue with Google” while signed in to link the two.",
   google_not_configured: "Google sign-in isn't set up on this machine yet.",
 };
 
@@ -215,7 +217,16 @@ function LoginInner() {
             />
           </div>
 
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && (
+            <div className="text-xs text-red-600">
+              <p>{error}</p>
+              {mode === "signin" && error === "Invalid email or password." && (
+                <p className="mt-0.5 text-slate-500">
+                  If you signed up with Google, use the &ldquo;Continue with Google&rdquo; button below.
+                </p>
+              )}
+            </div>
+          )}
 
           <button
             disabled={busy}

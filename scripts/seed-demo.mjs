@@ -197,20 +197,38 @@ async function main() {
   }
 
   const clinician = await auth("clinician@demo.test", "Dr. Sarah Osei", "clinician", "Maple Health Clinic");
-  console.log("\nLinking patients to Maple Health Clinic…");
-  const profileIds = {};
+  console.log("\nRequesting access + patient approvals (consent flow)…");
   for (const p of patients) {
-    const link = await api("/api/care-links", {
+    const req = await api("/api/care-links", {
       method: "POST",
       cookie: clinician.cookie,
-      body: { code: p.user.share_code },
+      body: { code: p.user.share_code, purpose: "MedsCheck preparation" },
     });
-    if (link.ok) {
-      profileIds[p.spec.email] = link.data.profile_id;
-      console.log(`  linked ${p.spec.name}`);
-    } else {
-      console.log(`  !! link failed for ${p.spec.name}: ${link.data?.error}`);
+    if (!req.ok && req.status !== 409) {
+      console.log(`  !! request failed for ${p.spec.name}: ${req.data?.error}`);
+      continue;
     }
+    // Patient approves their pending request — consent is explicit now.
+    const patientCookie = (await auth(p.spec.email, p.spec.name, "patient")).cookie;
+    const grants = await api("/api/access", { cookie: patientCookie });
+    const pendingGrant = (grants.data?.grants ?? []).find((g) => g.status === "pending");
+    if (pendingGrant) {
+      await api(`/api/access/${pendingGrant.id}`, {
+        method: "POST",
+        cookie: patientCookie,
+        body: { action: "approve", expires_days: null },
+      });
+      console.log(`  ${p.spec.name} approved access`);
+    } else {
+      console.log(`  ${p.spec.name}: no pending request (already approved?)`);
+    }
+  }
+
+  const rosterRes = await api("/api/care-links", { cookie: clinician.cookie });
+  const profileIds = {};
+  for (const r of rosterRes.data?.roster ?? []) {
+    const match = patients.find((p) => p.spec.name.toLowerCase() === r.patient_name.toLowerCase());
+    if (match) profileIds[match.spec.email] = r.profile_id;
   }
 
   // Seed one clinician review: Margaret's warfarin × ibuprofen major alert.

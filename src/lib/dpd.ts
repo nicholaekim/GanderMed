@@ -1,4 +1,4 @@
-// Client for Health Canada's Drug Product Database (DPD) API.
+﻿// Client for Health Canada's Drug Product Database (DPD) API.
 // Docs: https://health-products.canada.ca/api/documentation/dpd-documentation-en.html
 // Free, no key. Nightly-updated. All calls happen server-side.
 
@@ -16,6 +16,16 @@ async function dpdFetch<T>(pathAndQuery: string): Promise<T[]> {
   const data = (await res.json()) as T | T[] | null;
   if (data == null) return [];
   return Array.isArray(data) ? data : [data];
+}
+
+type DpdFetcher = <T>(pathAndQuery: string) => Promise<T[]>;
+
+// The active fetcher is swappable so integrity tests can run against mocked
+// Health Canada responses instead of the live API.
+let activeFetch: DpdFetcher = dpdFetch;
+
+export function __setDpdFetchForTests(fetcher: DpdFetcher | null): void {
+  activeFetch = fetcher ?? dpdFetch;
 }
 
 interface DpdProduct {
@@ -49,8 +59,8 @@ export async function searchProducts(query: string): Promise<SearchResult[]> {
   const isDin = /^\d{6,8}$/.test(q);
 
   const rows = isDin
-    ? await dpdFetch<DpdProduct>(`drugproduct/?din=${q.padStart(8, "0")}&lang=en&type=json`)
-    : await dpdFetch<DpdProduct>(`drugproduct/?brandname=${encodeURIComponent(q)}&status=2&lang=en&type=json`);
+    ? await activeFetch<DpdProduct>(`drugproduct/?din=${q.padStart(8, "0")}&lang=en&type=json`)
+    : await activeFetch<DpdProduct>(`drugproduct/?brandname=${encodeURIComponent(q)}&status=2&lang=en&type=json`);
 
   const lower = q.toLowerCase();
   const seen = new Set<string>();
@@ -83,12 +93,59 @@ export interface ProductDetails {
   status: string | null;
 }
 
+export type DpdVerifyCode = "not_found" | "not_human" | "not_marketed" | "no_ingredients";
+
+export class DpdVerifyError extends Error {
+  constructor(public code: DpdVerifyCode) {
+    super(`DPD verification failed: ${code}`);
+  }
+}
+
+export interface VerifiedProduct {
+  drug_code: number;
+  din: string;
+  brand_name: string;
+  company_name: string | null;
+  route: string | null;
+  dosage_form: string | null;
+  ingredients: ProductDetails["ingredients"];
+}
+
+/**
+ * Resolves the AUTHORITATIVE product record for a drug_code from Health
+ * Canada, and enforces the safety-check eligibility rules: the product must
+ * exist, be a human product, be currently marketed, and list at least one
+ * active ingredient. Client-supplied metadata (brand name, DIN, company) is
+ * never trusted — everything stored comes from this lookup.
+ */
+export async function getVerifiedProduct(drugCode: number): Promise<VerifiedProduct> {
+  const [products, details] = await Promise.all([
+    activeFetch<DpdProduct>(`drugproduct/?id=${drugCode}&lang=en&type=json`),
+    getProductDetails(drugCode),
+  ]);
+  const product = products[0];
+  if (!product) throw new DpdVerifyError("not_found");
+  if (product.class_name !== "Human") throw new DpdVerifyError("not_human");
+  if ((details.status ?? "").trim().toLowerCase() !== "marketed") throw new DpdVerifyError("not_marketed");
+  if (details.ingredients.length === 0) throw new DpdVerifyError("no_ingredients");
+
+  return {
+    drug_code: product.drug_code,
+    din: product.drug_identification_number,
+    brand_name: product.brand_name,
+    company_name: product.company_name ?? null,
+    route: details.route,
+    dosage_form: details.dosage_form,
+    ingredients: details.ingredients,
+  };
+}
+
 export async function getProductDetails(drugCode: number): Promise<ProductDetails> {
   const [ingredients, routes, forms, statuses] = await Promise.all([
-    dpdFetch<DpdIngredient>(`activeingredient/?id=${drugCode}&lang=en&type=json`),
-    dpdFetch<DpdRoute>(`route/?id=${drugCode}&lang=en&type=json`).catch(() => []),
-    dpdFetch<DpdForm>(`form/?id=${drugCode}&lang=en&type=json`).catch(() => []),
-    dpdFetch<DpdStatus>(`status/?id=${drugCode}&lang=en&type=json`).catch(() => []),
+    activeFetch<DpdIngredient>(`activeingredient/?id=${drugCode}&lang=en&type=json`),
+    activeFetch<DpdRoute>(`route/?id=${drugCode}&lang=en&type=json`).catch(() => []),
+    activeFetch<DpdForm>(`form/?id=${drugCode}&lang=en&type=json`).catch(() => []),
+    activeFetch<DpdStatus>(`status/?id=${drugCode}&lang=en&type=json`).catch(() => []),
   ]);
 
   return {

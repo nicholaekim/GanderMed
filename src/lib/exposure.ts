@@ -49,6 +49,8 @@ export interface ExposureComputation {
   activeKeys: Set<string>;
   /** keys for which window modeling is possible at all (profiled ingredient, non-ER product) */
   modelableKeys: Set<string>;
+  /** medications with at least one taken/late dose inside the lookback window */
+  dosedMedIds: Set<number>;
 }
 
 function doseMg(
@@ -106,6 +108,7 @@ export function computeExposure(db: DatabaseSync, profileId: number): ExposureCo
   }
 
   const activeKeys = new Set<string>();
+  const dosedMedIds = new Set<number>();
   const activeUntil = new Map<string, { until: number; sources: Map<string, number> }>(); // ingredient -> latest end
   const totals = new Map<string, RollingTotal>();
 
@@ -114,6 +117,7 @@ export function computeExposure(db: DatabaseSync, profileId: number): ExposureCo
     if (!med) continue;
     const takenAt = new Date(ev.logged_at).getTime();
     if (isNaN(takenAt)) continue;
+    dosedMedIds.add(med.id);
 
     for (const ing of med.ingredients) {
       const name = ing.canonical_name;
@@ -189,16 +193,23 @@ export function computeExposure(db: DatabaseSync, profileId: number): ExposureCo
     },
     activeKeys,
     modelableKeys,
+    dosedMedIds,
   };
 }
 
-// Annotates alerts with whether their ingredient pair is estimated to be
-// active simultaneously right now, based on recorded doses.
+// Annotates alerts with what the recorded doses actually support saying:
+//   overlap            — both sides estimated active right now
+//   no_overlap         — both sides have logged doses, no estimated overlap
+//   insufficient_data  — timing is modelable but doses aren't logged; this
+//                        must NEVER be presented as reassurance
+//   unknown            — timing isn't modelable (no profile / ER product)
+// Exposure status NEVER changes an alert's severity — timing separation does
+// not remove an interaction concern.
 // Alert ingredient pairs are sorted alphabetically while med ids are sorted
 // numerically, so ingredient_a is not necessarily med_a's ingredient — both
 // orientations must be checked.
 export function annotateAlertsWithExposure(alerts: Alert[], exposure: ExposureComputation): Alert[] {
-  const { activeKeys, modelableKeys } = exposure;
+  const { activeKeys, modelableKeys, dosedMedIds } = exposure;
   for (const a of alerts) {
     const pairings: [string, string][] = [
       [`${a.med_a_id}|${a.ingredient_a}`, `${a.med_b_id}|${a.ingredient_b}`],
@@ -211,7 +222,8 @@ export function annotateAlertsWithExposure(alerts: Alert[], exposure: ExposureCo
         status = "overlap";
         break;
       }
-      status = "no_overlap";
+      status =
+        dosedMedIds.has(a.med_a_id) && dosedMedIds.has(a.med_b_id) ? "no_overlap" : "insufficient_data";
     }
     a.exposure_status = status;
   }

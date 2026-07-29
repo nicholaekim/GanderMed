@@ -11,9 +11,11 @@ import { RULESET_VERSION } from "@/data/interactionRules";
 import type { Evidence } from "@/lib/types";
 
 const EXPOSURE_LABEL: Record<string, string> = {
-  overlap: "Recorded doses estimated to be active at the same time",
-  no_overlap: "No overlap in recorded doses at generation time",
-  unknown: "Timing not modeled for this pair",
+  overlap: "Recorded doses may have overlapped (estimate)",
+  no_overlap:
+    "No overlap identified in the available dose records — separating doses does not necessarily remove this interaction concern",
+  insufficient_data: "Not enough logged doses to assess timing",
+  unknown: "Timing not modelled for this pair",
 };
 
 export default function ReportPage() {

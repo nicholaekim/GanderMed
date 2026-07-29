@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { logAudit } from "@/lib/access";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -21,5 +22,7 @@ export async function DELETE(request: Request, ctx: Ctx) {
     .prepare("UPDATE alert_reviews SET revoked_at = ? WHERE id = ? AND reviewer_user_id = ? AND revoked_at IS NULL")
     .run(new Date().toISOString(), reviewId, user.id);
   if (Number(info.changes) === 0) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const review = db.prepare("SELECT profile_id FROM alert_reviews WHERE id = ?").get(reviewId) as { profile_id: number };
+  logAudit(db, { actor: user.id, action: "review_revoked", profileId: review.profile_id, targetId: reviewId });
   return NextResponse.json({ ok: true });
 }

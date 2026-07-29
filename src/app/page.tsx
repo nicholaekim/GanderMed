@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Alert, DoseEvent, ExposureReport, Me, Medication } from "@/lib/types";
+import AccessPanel from "@/components/AccessPanel";
 import AddMedication, { type AddResult } from "@/components/AddMedication";
 import AlertsPanel from "@/components/AlertsPanel";
 import ChatPanel from "@/components/ChatPanel";
@@ -220,18 +221,7 @@ export default function Dashboard() {
             <AddMedication onAdded={handleAdded} />
             <TodaySchedule meds={meds} events={events} onLog={logDose} />
             <ExposurePanel exposure={exposure} />
-            {me?.share_code && (
-              <section className="rounded-2xl border border-teal-200 bg-teal-50/60 p-5">
-                <h2 className="text-sm font-semibold">Share with your care team</h2>
-                <p className="mt-1 text-xs text-slate-600">
-                  Give this care code to your clinic or pharmacist — they can view your record and
-                  add professional review notes to alerts, but can&apos;t edit anything.
-                </p>
-                <p className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-2 text-center font-mono text-lg font-bold tracking-widest text-teal-800">
-                  {me.share_code}
-                </p>
-              </section>
-            )}
+            {me?.share_code && <AccessPanel initialCode={me.share_code} />}
           </div>
           <div className="space-y-6">
             <AlertsPanel alerts={alerts} onAck={ack} />

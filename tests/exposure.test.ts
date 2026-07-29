@@ -112,11 +112,38 @@ test("REGRESSION: alert overlap annotation checks both med/ingredient orientatio
   assert.equal(all[0].exposure_status, "overlap");
 });
 
-test("no recorded doses → alert annotated no_overlap (not unknown)", () => {
+test("HONESTY: no recorded doses must read as insufficient_data, never as reassurance", () => {
   const db = freshDb();
   const p = addProfile(db);
   addMed(db, p, { name: "APO-WARFARIN", ingredients: [{ name: "WARFARIN SODIUM", strength: "1" }] });
   addMed(db, p, { name: "ADVIL", ingredients: [{ name: "IBUPROFEN", strength: "200" }] });
+
+  const { all } = recomputeAlerts(db, p);
+  annotateAlertsWithExposure(all, computeExposure(db, p));
+  assert.equal(all[0].exposure_status, "insufficient_data");
+});
+
+test("HONESTY: one dosed medication is still insufficient data for the pair", () => {
+  const db = freshDb();
+  const p = addProfile(db);
+  const warfarin = addMed(db, p, { name: "APO-WARFARIN", ingredients: [{ name: "WARFARIN SODIUM", strength: "1" }] });
+  addMed(db, p, { name: "ADVIL", ingredients: [{ name: "IBUPROFEN", strength: "200" }] });
+  logDose(db, warfarin, { hoursAgo: 1 });
+
+  const { all } = recomputeAlerts(db, p);
+  annotateAlertsWithExposure(all, computeExposure(db, p));
+  assert.equal(all[0].exposure_status, "insufficient_data");
+});
+
+test("both meds dosed but windows apart → no_overlap (a real modelled result)", () => {
+  const db = freshDb();
+  const p = addProfile(db);
+  const warfarin = addMed(db, p, { name: "APO-WARFARIN", ingredients: [{ name: "WARFARIN SODIUM", strength: "1" }] });
+  const advil = addMed(db, p, { name: "ADVIL", ingredients: [{ name: "IBUPROFEN", strength: "200" }] });
+  // Both logged. Warfarin (48h window) is still active at 30h; ibuprofen
+  // (8h window) is long inactive → modelled, dosed, and NOT overlapping.
+  logDose(db, warfarin, { hoursAgo: 30 });
+  logDose(db, advil, { hoursAgo: 30 });
 
   const { all } = recomputeAlerts(db, p);
   annotateAlertsWithExposure(all, computeExposure(db, p));

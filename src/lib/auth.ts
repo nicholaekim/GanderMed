@@ -45,15 +45,35 @@ export function clearSessionCookie(): string {
   return buildCookie("", 0);
 }
 
+/** Secure flag is on in production (or when SECURE_COOKIES=1 for staging). */
+export function cookieSecureSuffix(): string {
+  return process.env.NODE_ENV === "production" || process.env.SECURE_COOKIES === "1" ? "; Secure" : "";
+}
+
 function buildCookie(token: string, maxAgeSeconds: number): string {
-  // No `Secure` flag: the prototype runs on http://localhost. Required for real deployments.
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(maxAgeSeconds)}`;
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(maxAgeSeconds)}${cookieSecureSuffix()}`;
+}
+
+/**
+ * Invalidates every session for a user except (optionally) the current one.
+ * Called on account-security changes such as linking a Google identity.
+ */
+export function invalidateOtherSessions(db: DatabaseSync, userId: number, keepToken?: string | null): void {
+  if (keepToken) {
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND token != ?").run(userId, keepToken);
+  } else {
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+  }
 }
 
 function readSessionToken(request: Request): string | null {
   const header = request.headers.get("cookie") ?? "";
   const match = header.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([a-f0-9]{64})`));
   return match ? match[1] : null;
+}
+
+export function getSessionToken(request: Request): string | null {
+  return readSessionToken(request);
 }
 
 export function getUserFromRequest(db: DatabaseSync, request: Request): SessionUser | null {
@@ -100,7 +120,9 @@ export function normalizeShareCode(input: string): string | null {
 /**
  * Resolves which medication profile a request may act on.
  * Patients always act on their own profile. Clinicians may READ profiles
- * they hold a care link for, via ?patient=<profileId>; they may never write.
+ * only under an ACTIVE, unexpired, patient-approved access grant, via
+ * ?patient=<profileId>; they may never write. Expiry is enforced lazily
+ * right here, so a lapsed grant blocks the very next request.
  */
 export function resolveProfileAccess(
   db: DatabaseSync,
@@ -120,10 +142,19 @@ export function resolveProfileAccess(
   if (!Number.isInteger(profileId)) {
     return { error: "Missing ?patient=<id> for care-team access.", status: 400 };
   }
-  const link = db
-    .prepare("SELECT 1 FROM care_links WHERE clinician_user_id = ? AND profile_id = ?")
-    .get(user.id, profileId);
-  if (!link) return { error: "No care link for this patient.", status: 403 };
+  const grant = db
+    .prepare(
+      "SELECT id, expires_at FROM access_grants WHERE clinician_user_id = ? AND profile_id = ? AND status = 'active'"
+    )
+    .get(user.id, profileId) as { id: number; expires_at: string | null } | undefined;
+  if (grant && grant.expires_at && grant.expires_at <= new Date().toISOString()) {
+    db.prepare("UPDATE access_grants SET status = 'expired' WHERE id = ? AND status = 'active'").run(grant.id);
+    db.prepare(
+      "INSERT INTO audit_events (actor_user_id, action, profile_id, target_id) VALUES (NULL, 'access_expired', ?, ?)"
+    ).run(profileId, grant.id);
+    return { error: "Access to this patient has expired.", status: 403 };
+  }
+  if (!grant) return { error: "No active patient-approved access for this record.", status: 403 };
   return { profileId };
 }
 

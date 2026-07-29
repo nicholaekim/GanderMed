@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { logAudit } from "@/lib/access";
 import type { Alert } from "@/lib/types";
 
 const VALID_DAYS = new Set([30, 90, 180]);
@@ -33,10 +34,14 @@ export async function POST(request: Request) {
   const alert = db.prepare("SELECT * FROM alerts WHERE id = ?").get(alertId) as unknown as Alert | undefined;
   if (!alert) return NextResponse.json({ error: "Alert not found." }, { status: 404 });
 
-  const link = db
-    .prepare("SELECT 1 FROM care_links WHERE clinician_user_id = ? AND profile_id = ?")
+  const grant = db
+    .prepare(
+      `SELECT 1 FROM access_grants
+       WHERE clinician_user_id = ? AND profile_id = ? AND status = 'active'
+         AND (expires_at IS NULL OR expires_at > datetime('now'))`
+    )
     .get(user.id, alert.profile_id);
-  if (!link) return NextResponse.json({ error: "No care link for this patient." }, { status: 403 });
+  if (!grant) return NextResponse.json({ error: "No active patient-approved access for this record." }, { status: 403 });
 
   db.exec("BEGIN");
   try {
@@ -65,7 +70,9 @@ export async function POST(request: Request) {
         user.id, user.display_name, user.clinic_name, note, alert.source_version, expires
       );
     db.exec("COMMIT");
-    const review = db.prepare("SELECT * FROM alert_reviews WHERE id = ?").get(Number(info.lastInsertRowid));
+    const reviewId = Number(info.lastInsertRowid);
+    logAudit(db, { actor: user.id, action: "review_created", profileId: alert.profile_id, targetId: reviewId });
+    const review = db.prepare("SELECT * FROM alert_reviews WHERE id = ?").get(reviewId);
     return NextResponse.json({ review });
   } catch (e) {
     db.exec("ROLLBACK");

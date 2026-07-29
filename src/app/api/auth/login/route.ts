@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { createSession, getUserFromRequest, verifyPassword } from "@/lib/auth";
+import { allowRequest, clientIp } from "@/lib/ratelimit";
 
 export async function POST(request: Request) {
   let body: { email?: string; password?: string };
@@ -12,18 +13,19 @@ export async function POST(request: Request) {
   const email = body.email?.trim().toLowerCase() ?? "";
   const password = body.password ?? "";
 
+  if (!allowRequest(`login:${clientIp(request)}:${email}`, 10, 15 * 60_000)) {
+    return NextResponse.json({ error: "Too many attempts — try again in a few minutes." }, { status: 429 });
+  }
+
   const db = getDb();
   const row = db
     .prepare("SELECT id, password_hash, password_salt FROM users WHERE email = ?")
     .get(email) as { id: number; password_hash: string; password_salt: string } | undefined;
 
-  if (row && row.password_hash === "") {
-    return NextResponse.json(
-      { error: "This account uses Google sign-in — use the “Continue with Google” button." },
-      { status: 401 }
-    );
-  }
-  if (!row || !verifyPassword(password, row.password_salt, row.password_hash)) {
+  // One generic message for every failure — wrong password, unknown email,
+  // and Google-only accounts (empty hash never verifies) — so responses
+  // don't reveal whether an email is registered or how.
+  if (!row || row.password_hash === "" || !verifyPassword(password, row.password_salt, row.password_hash)) {
     return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
   }
 

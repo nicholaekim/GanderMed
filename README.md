@@ -8,7 +8,7 @@ A **Canadian-first medication-safety platform**: record what you take, when, and
 
 ## What it does
 
-- **Search real Canadian products** by brand name or DIN via Health Canada's [Drug Product Database](https://health-products.canada.ca/api/documentation/dpd-documentation-en.html) API (free, nightly-updated). Only marketed products are shown.
+- **Search real Canadian products** by brand name or DIN via Health Canada's [Drug Product Database](https://health-products.canada.ca/api/documentation/dpd-documentation-en.html) API (free, nightly-updated). Brand-name search is filtered to marketed products; DIN search finds any product, but **every add is re-verified server-side** — the server resolves brand, DIN, company, ingredients, and status authoritatively from Health Canada (client metadata is never trusted) and refuses to safety-check anything that isn't a currently marketed human product with listed ingredients.
 - **Expands combination products into active ingredients** (e.g. Advil Flu → ibuprofen + diphenhydramine), with strengths, route, and dosage form.
 - **Duplicate-ingredient detection** — flags when two products share an active ingredient (the classic Tylenol + cold-medicine acetaminophen trap).
 - **Drug–drug interaction alerts** from a curated, class-expanded ruleset (~30 rule groups → hundreds of ingredient pairs). Every alert is structured: severity, evidence level, plain-language mechanism, recommended action, source, source version, and user acknowledgment tracking.
@@ -19,9 +19,9 @@ A **Canadian-first medication-safety platform**: record what you take, when, and
   - **Exposure-tagged alerts**: "⏱ Both estimated active now" vs "No overlap in recorded doses" — an interaction between things you actually took today outranks one between things merely co-listed.
 - **Pharmacist-question generator**: each alert expands into specific, deterministic questions to bring to the pharmacy (never advice).
 - **Pharmacist report** (`/report`): print-friendly summary of current meds, alerts (with exposure status + questions), 24h totals, and 14-day adherence.
-- **Two roles (v0.3)** — built for the clinic pitch:
-  - **Patient accounts**: the full dashboard above, plus a **care code** to share with their clinic.
-  - **Healthcare-professional accounts** (`/clinic`): patient roster with at-a-glance safety stats (open major/moderate alerts, active meds, last dose), linked by entering a patient's care code (the code *is* the consent), and a **view-only** patient record + printable report. Professionals cannot edit records or acknowledge alerts — acknowledgment stays with the patient.
+- **Two roles with patient-controlled consent (v0.3, hardened v0.8)**:
+  - **Patient accounts**: the full dashboard above, plus an **Access & privacy panel** — a care code that lets a clinician *request* access, pending requests to approve or deny (optionally with a 30/90/180-day expiry), one-click revocation, care-code rotation, and a visible audit trail of who viewed the record and when.
+  - **Healthcare-professional accounts** (`/clinic`): entering a patient's care code sends an **access request with a stated purpose** — nothing is visible until the patient approves. The roster shows approved patients with at-a-glance safety stats; records are **view-only** (professionals cannot edit medications, doses, or acknowledgments — their one write is expiring review annotations). Revoked or expired access blocks the very next request. Professional accounts are **not identity-verified** in this prototype.
 - **Clinician alert reviews (v0.3)** — the anti-alert-fatigue feature: a professional can mark a combination as reviewed ("Intentional — INR monitored weekly") with a 30/90/180-day validity. Reviewed alerts stay visible but move to a calm "Reviewed by your care team" section for the patient and drop out of the roster's open counts. The review is keyed to the exact combination (products + ingredients + ruleset version), so the system **re-alerts automatically** when a product is swapped, a new product introduces the same pair, the ruleset updates, or the review expires. Reviews never change severity and never hide an alert.
 
 ### Design rules (deliberate)
@@ -35,7 +35,10 @@ A **Canadian-first medication-safety platform**: record what you take, when, and
 ```bash
 npm install
 npm run dev        # http://localhost:3000
+npm test           # deterministic safety/auth/consent suite (no network needed)
 ```
+
+CI (GitHub Actions) runs type-check, the test suite, and a production build on every push — no live Health Canada access, OAuth, or Anthropic credentials required. See [BACKLOG.md](BACKLOG.md) for the honest list of what is **not** implemented yet (pharmacy organizations, invitations/intake, medication editing, real adherence, reconciliation workspace, pilot metrics).
 
 Requires Node.js 24+ (uses the built-in `node:sqlite` — no native modules). The dev script passes `--use-system-ca` so Node trusts the Windows certificate store; on this machine outbound TLS fails without it.
 
@@ -56,7 +59,7 @@ All patient accounts use `DemoPass123`. Note: supplements (plain calcium, vitami
 
 Passwords are salted scrypt hashes; sessions are random tokens in httpOnly cookies; every API route is session-checked and role-scoped (clinicians are read-only, and only for care-code-linked patients).
 
-**"Continue with Google"** is built in (hand-rolled OpenID Connect — start route sets a state cookie, callback exchanges the code server-side and mints the same session cookie). It signs in existing users, links Google to an existing email account, or creates a new account using the role selected on the login page (clinicians must enter a clinic name first). To enable it: create a free OAuth client at console.cloud.google.com (Web application, redirect URI `http://localhost:3000/api/auth/google/callback`, add yourself as a test user on the consent screen) and set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` in `.env.local` (see `.env.example`). Until then the button shows these setup steps. That is honest demo auth — **not** clinic-deployment auth. Before selling into a clinic you need: managed authentication with MFA, HTTPS everywhere (cookies currently lack `Secure` for localhost), rate limiting and lockout, audit logging of every record access, encryption at rest, data-residency (Canadian hosting), a PIPEDA/PHIPA privacy review, and likely Health Canada SaMD classification for the alerting feature.
+**"Continue with Google"** is built in (hand-rolled OpenID Connect — start route sets a state cookie, callback exchanges the code server-side and mints the same session cookie). Account linking follows a **safe policy**: a known Google identity signs in; an authenticated session for the same email may link; a *verified* email account auto-links (and other sessions are revoked); an **unverified password account is never silently linked** — this blocks the pre-account-takeover pattern where an attacker registers someone else's email first. Login/registration are rate limited, auth errors are generic, and cookies gain the `Secure` flag in production (`SECURE_COOKIES=1` to force). To enable Google: create a free OAuth client at console.cloud.google.com (Web application, redirect URI `http://localhost:3000/api/auth/google/callback`, add yourself as a test user) and set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` in `.env.local` (see `.env.example`). That is honest demo auth — **not** clinic-deployment auth. Before selling into a clinic you need: managed authentication with MFA, HTTPS everywhere (cookies currently lack `Secure` for localhost), rate limiting and lockout, audit logging of every record access, encryption at rest, data-residency (Canadian hosting), a PIPEDA/PHIPA privacy review, and likely Health Canada SaMD classification for the alerting feature.
 
 ## Architecture
 

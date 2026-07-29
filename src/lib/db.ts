@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL CHECK (role IN ('patient','clinician')),
   clinic_name TEXT,
   google_sub TEXT,
+  email_verified_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -101,6 +102,37 @@ CREATE TABLE IF NOT EXISTS care_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (clinician_user_id, profile_id)
 );
+
+CREATE TABLE IF NOT EXISTS access_grants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  clinician_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organization_id INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','active','denied','revoked','expired')),
+  purpose TEXT,
+  requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+  requested_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  decided_at TEXT,
+  approved_by_user_id INTEGER REFERENCES users(id),
+  starts_at TEXT,
+  expires_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_grants_profile ON access_grants(profile_id);
+CREATE INDEX IF NOT EXISTS idx_grants_clinician ON access_grants(clinician_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_grants_open
+  ON access_grants(profile_id, clinician_user_id) WHERE status IN ('pending','active');
+
+CREATE TABLE IF NOT EXISTS audit_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL DEFAULT (datetime('now')),
+  actor_user_id INTEGER,
+  action TEXT NOT NULL,
+  profile_id INTEGER,
+  target_id INTEGER,
+  meta TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_profile ON audit_events(profile_id, at);
 
 CREATE TABLE IF NOT EXISTS alert_reviews (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -230,6 +262,27 @@ function migrateColumns(db: DatabaseSync) {
     // column already exists
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_sub)");
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN email_verified_at TEXT");
+  } catch {
+    // column already exists
+  }
+  // Google-linked accounts proved email ownership through Google's own
+  // verification; password accounts stay unverified until a real email flow.
+  db.exec(
+    "UPDATE users SET email_verified_at = datetime('now') WHERE google_sub IS NOT NULL AND email_verified_at IS NULL"
+  );
+  // Consent migration: pre-consent care_links become active grants once
+  // (idempotent). The care_links table itself is retired from all code paths.
+  db.exec(
+    `INSERT INTO access_grants (profile_id, clinician_user_id, status, purpose, requested_by_user_id, decided_at, starts_at)
+     SELECT cl.profile_id, cl.clinician_user_id, 'active', 'Migrated from prototype care-code link', cl.clinician_user_id, cl.created_at, cl.created_at
+     FROM care_links cl
+     WHERE NOT EXISTS (
+       SELECT 1 FROM access_grants g
+       WHERE g.profile_id = cl.profile_id AND g.clinician_user_id = cl.clinician_user_id
+     )`
+  );
   // Every profile gets a care code (used by clinicians to link patients).
   const missing = db.prepare("SELECT id FROM profiles WHERE share_code IS NULL").all() as unknown as { id: number }[];
   for (const p of missing) {
