@@ -54,15 +54,12 @@ window, timezone per profile (currently single-local-TZ, documented).
   cumulative, persistent-PD/enzyme, timing-not-protective) need a ruleset
   schema extension. Never auto-reduce severity from timing.
 
-## Phase 10 — Reconciliation workspace (MedsCheck prep)
-- Per-med review row: product/DIN, ingredients, reported dose+schedule,
-  actual-use status, recent logs, provenance, verification, patient notes,
-  pharmacist notes, discrepancy status.
-- Deterministic discrepancy categories (unconfirmed, prescribed-not-taking,
-  taking-differently, duplicate ingredient, unverified, recently stopped,
-  missing dose/schedule, interaction pending review, adherence incomplete).
-- Pharmacist dispositions (confirmed / resolved / follow-up / patient unsure /
-  referred) with who+when. Never auto-decide which list is correct.
+## Phase 10 — DONE (see CLAUDE.md "Reconciliation workspace")
+Deterministic per-med discrepancy flags, sessions with dispositions
+(who+when, flags snapshot), pharmacy-confirmed provenance on confirmation
+with honest revert on later dose edits, patient-visible history + audit.
+Deferred to Phase 11: per-med dispositions printed on the report (the
+header line ships now).
 
 ## Phase 11 — Reports and pilot metrics
 - Report additions: consent context, provenance, actual-use, reconciliation

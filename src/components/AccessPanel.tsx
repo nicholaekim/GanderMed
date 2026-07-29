@@ -15,6 +15,9 @@ const AUDIT_LABELS: Record<string, string> = {
   record_opened: "viewed your record",
   review_created: "added an alert review",
   review_revoked: "withdrew an alert review",
+  reconciliation_started: "started a medication reconciliation",
+  reconciliation_item_disposed: "reviewed a medication in reconciliation",
+  reconciliation_completed: "completed a medication reconciliation",
 };
 
 export default function AccessPanel({ initialCode }: { initialCode: string }) {

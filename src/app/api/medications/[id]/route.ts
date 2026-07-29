@@ -176,6 +176,11 @@ export async function PATCH(request: Request, ctx: Ctx) {
   // it targets the product combination, which hasn't changed).
   if (materialChange) {
     sets.push("last_material_change_at = datetime('now')");
+    // A pharmacy confirmation described the entry as it was; the entry just
+    // changed, so the confirmation no longer holds.
+    if (current.provenance === "pharmacy-confirmed") {
+      sets.push("provenance = 'patient-reported'");
+    }
   }
 
   db.prepare(`UPDATE medications SET ${sets.join(", ")} WHERE id = ? AND profile_id = ?`).run(...args, medId, profileId);

@@ -10,6 +10,7 @@ import MedicationList from "@/components/MedicationList";
 import ExposurePanel from "@/components/ExposurePanel";
 import HistoryList from "@/components/HistoryList";
 import AdherenceCard from "@/components/AdherenceCard";
+import ReconcilePanel from "@/components/ReconcilePanel";
 import { titleCase } from "@/lib/normalize";
 import type { AdherenceReport } from "@/lib/adherence";
 
@@ -128,6 +129,7 @@ export default function ClinicPatientPage({ params }: { params: Promise<{ id: st
           <HistoryList events={events} />
         </div>
         <div className="space-y-6">
+          <ReconcilePanel patientId={Number(id)} meds={meds} />
           <AlertsPanel
             alerts={alerts}
             readOnly

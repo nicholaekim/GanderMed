@@ -36,18 +36,27 @@ function ReportInner() {
   const [events, setEvents] = useState<DoseEvent[]>([]);
   const [exposure, setExposure] = useState<ExposureReport | null>(null);
   const [adherence, setAdherence] = useState<AdherenceReport | null>(null);
+  const [lastReconciled, setLastReconciled] = useState<{
+    completed_at: string;
+    clinician_name: string;
+    clinic_name: string | null;
+    disposed: number;
+    meds_total: number | null;
+    summary_note: string | null;
+  } | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
       const qs = patientParam ? `?patient=${patientParam}` : "";
       const eventsQs = patientParam ? `?patient=${patientParam}&days=14` : "?days=14";
-      const [mRes, aRes, eRes, xRes, adRes] = await Promise.all([
+      const [mRes, aRes, eRes, xRes, adRes, rRes] = await Promise.all([
         fetch(`/api/medications${qs}`),
         fetch(`/api/alerts${qs}`),
         fetch(`/api/dose-events${eventsQs}`),
         fetch(`/api/exposure${qs}`),
         fetch(`/api/adherence${eventsQs}`),
+        fetch(`/api/reconcile${qs}`),
       ]);
       if (mRes.status === 401) {
         router.replace("/login");
@@ -62,6 +71,7 @@ function ReportInner() {
       if (eRes.ok) setEvents((await eRes.json()).events ?? []);
       if (xRes.ok) setExposure((await xRes.json()).exposure ?? null);
       if (adRes.ok) setAdherence((await adRes.json()).adherence ?? null);
+      if (rRes.ok) setLastReconciled((await rRes.json()).last_completed ?? null);
       setLoaded(true);
     })();
   }, [patientParam, router]);
@@ -93,6 +103,15 @@ function ReportInner() {
         Generated {new Date().toLocaleString()} · GanderMed (prototype) · For review with a
         pharmacist or prescriber
       </p>
+      {lastReconciled && (
+        <p className="mt-1 text-xs font-medium text-violet-800">
+          Last pharmacist reconciliation: {fmtDate(lastReconciled.completed_at)} by{" "}
+          {titleCase(lastReconciled.clinician_name)}
+          {lastReconciled.clinic_name ? ` (${titleCase(lastReconciled.clinic_name)})` : ""} —{" "}
+          {lastReconciled.disposed} of {lastReconciled.meds_total ?? "?"} medications reviewed
+          {lastReconciled.summary_note ? ` · “${lastReconciled.summary_note}”` : ""}
+        </p>
+      )}
 
       {!loaded ? (
         <p className="mt-8 text-sm text-slate-400">Loading…</p>

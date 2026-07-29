@@ -110,6 +110,35 @@ CREATE TABLE IF NOT EXISTS care_links (
   UNIQUE (clinician_user_id, profile_id)
 );
 
+CREATE TABLE IF NOT EXISTS reconciliation_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  clinician_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  clinician_name TEXT NOT NULL,
+  clinic_name TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','completed')),
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT,
+  summary_note TEXT,
+  meds_total INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_recon_profile ON reconciliation_sessions(profile_id, started_at);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_recon_open
+  ON reconciliation_sessions(profile_id, clinician_user_id) WHERE status = 'open';
+
+CREATE TABLE IF NOT EXISTS reconciliation_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES reconciliation_sessions(id) ON DELETE CASCADE,
+  medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+  flags TEXT NOT NULL,
+  disposition TEXT NOT NULL CHECK (disposition IN ('confirmed','resolved','follow_up','patient_unsure','referred')),
+  note TEXT,
+  disposed_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  disposed_by_name TEXT NOT NULL,
+  disposed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(session_id, medication_id)
+);
+
 CREATE TABLE IF NOT EXISTS medication_schedule_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
