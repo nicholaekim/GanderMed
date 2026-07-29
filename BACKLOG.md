@@ -61,13 +61,13 @@ with honest revert on later dose edits, patient-visible history + audit.
 Deferred to Phase 11: per-med dispositions printed on the report (the
 header line ships now).
 
-## Phase 11 — Reports and pilot metrics
-- Report additions: consent context, provenance, actual-use, reconciliation
-  discrepancies, adherence incl. missed, versions, limitations. Structure for
-  a future server-side PDF.
-- PHI-free pilot metrics: invitation completion, median intake/review time,
-  discrepancies per intake, duplicates found, unverified counts, reviews,
-  reopened alerts, revocations, drop-off stage. Mark which are auto-measured.
+## Phase 11 — DONE (see CLAUDE.md "Report & pilot metrics")
+Report now carries consent context, per-med reconciliation dispositions,
+provenance/actual-use, adherence incl. missed + formula, and versions.
+/api/metrics + clinic panel ship the PHI-free pilot aggregates with an
+explicit not_instrumented list (reopened alerts, in-wizard drop-off timing
+need an event log — still open). Server-side PDF export remains a
+cross-cutting deferred item.
 
 ## Cross-cutting deferred items
 - Email verification flow for password accounts (Resend/Postmark) — until

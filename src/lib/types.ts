@@ -10,6 +10,17 @@ export interface ProductIngredient {
   strength_unit: string | null;
 }
 
+/** Pharmacist reconciliation dispositions (client-safe labels — no server imports here). */
+export type Disposition = "confirmed" | "resolved" | "follow_up" | "patient_unsure" | "referred";
+
+export const DISPOSITION_LABELS: Record<Disposition, string> = {
+  confirmed: "Confirmed correct as listed",
+  resolved: "Discrepancy resolved",
+  follow_up: "Needs follow-up",
+  patient_unsure: "Patient unsure — recheck",
+  referred: "Referred to prescriber",
+};
+
 /** Where this medication record came from. Server-owned — clients can never set it. */
 export type Provenance =
   | "patient-reported"

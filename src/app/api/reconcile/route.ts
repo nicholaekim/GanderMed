@@ -32,9 +32,15 @@ export async function GET(request: Request) {
     .prepare("SELECT id FROM medications WHERE profile_id = ? AND status = 'active' ORDER BY brand_name")
     .all(profileId) as { id: number }[];
 
+  // Dispositions from the most recent completed reconciliation are part of
+  // the record (they appear on the printable report); patients see their own.
+  const lastCompleted = getLastCompleted(db, profileId);
+  const lastCompletedItems = lastCompleted ? [...sessionItems(db, lastCompleted.id).values()] : [];
+
   return NextResponse.json({
     session,
-    last_completed: getLastCompleted(db, profileId),
+    last_completed: lastCompleted,
+    last_completed_items: lastCompletedItems,
     items: meds.map((m) => {
       const saved = items.get(m.id);
       return {

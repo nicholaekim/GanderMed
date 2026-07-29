@@ -3,8 +3,9 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ACTUAL_USE_LABELS, PROVENANCE_LABELS, type Alert, type DoseEvent, type ExposureReport, type Medication, type Severity } from "@/lib/types";
+import { ACTUAL_USE_LABELS, DISPOSITION_LABELS, PROVENANCE_LABELS, type AccessGrantView, type Alert, type Disposition, type DoseEvent, type ExposureReport, type Medication, type Severity } from "@/lib/types";
 import type { AdherenceReport } from "@/lib/adherence";
+import { EXPOSURE_VERSION } from "@/data/ingredientProfiles";
 import { EVIDENCE_LABEL, SEVERITY_META, fmtDate, fmtTime, scheduleLabel } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
 import { pharmacistQuestions } from "@/lib/questions";
@@ -44,6 +45,10 @@ function ReportInner() {
     meds_total: number | null;
     summary_note: string | null;
   } | null>(null);
+  const [dispositions, setDispositions] = useState<
+    Map<number, { disposition: Disposition; note: string | null; disposed_by_name: string | null; disposed_at: string | null }>
+  >(new Map());
+  const [accessGrants, setAccessGrants] = useState<AccessGrantView[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -71,7 +76,27 @@ function ReportInner() {
       if (eRes.ok) setEvents((await eRes.json()).events ?? []);
       if (xRes.ok) setExposure((await xRes.json()).exposure ?? null);
       if (adRes.ok) setAdherence((await adRes.json()).adherence ?? null);
-      if (rRes.ok) setLastReconciled((await rRes.json()).last_completed ?? null);
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        setLastReconciled(rData.last_completed ?? null);
+        setDispositions(
+          new Map(
+            (rData.last_completed_items ?? []).map(
+              (i: { medication_id: number; disposition: Disposition; note: string | null; disposed_by_name: string | null; disposed_at: string | null }) => [
+                i.medication_id,
+                i,
+              ]
+            )
+          )
+        );
+      }
+      // Consent context is shown only on the patient's own report — a
+      // clinician printing it sees the reconciliation line, not other
+      // clinicians' grants.
+      if (!patientParam) {
+        const acRes = await fetch("/api/access");
+        if (acRes.ok) setAccessGrants(((await acRes.json()).grants ?? []) as AccessGrantView[]);
+      }
       setLoaded(true);
     })();
   }, [patientParam, router]);
@@ -155,6 +180,20 @@ function ReportInner() {
                         <>
                           <br />
                           <span className="italic text-amber-700">“{m.patient_notes}”</span>
+                        </>
+                      )}
+                      {dispositions.has(m.id) && (
+                        <>
+                          <br />
+                          <span className="font-semibold text-violet-800">
+                            Reconciliation: {DISPOSITION_LABELS[dispositions.get(m.id)!.disposition]}
+                            {dispositions.get(m.id)!.disposed_by_name
+                              ? ` — ${dispositions.get(m.id)!.disposed_by_name}, ${fmtDate(dispositions.get(m.id)!.disposed_at)}`
+                              : ""}
+                          </span>
+                          {dispositions.get(m.id)!.note && (
+                            <span className="block italic text-violet-700">“{dispositions.get(m.id)!.note}”</span>
+                          )}
                         </>
                       )}
                     </td>
@@ -286,6 +325,36 @@ function ReportInner() {
             </>
           )}
 
+          {!patientParam && (
+            <>
+              <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
+                Access &amp; consent
+              </h2>
+              {accessGrants.filter((g) => g.status === "active").length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">
+                  No care-team members currently have access to this record.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-1 text-xs">
+                  {accessGrants
+                    .filter((g) => g.status === "active")
+                    .map((g) => (
+                      <li key={g.id}>
+                        <span className="font-semibold">{titleCase(g.clinician_name)}</span>
+                        {g.clinic_name ? ` (${titleCase(g.clinic_name)})` : ""} — {g.purpose ?? "no purpose stated"} ·
+                        approved {fmtDate(g.starts_at)} ·{" "}
+                        {g.expires_at ? `expires ${fmtDate(g.expires_at)}` : "no expiry"}
+                      </li>
+                    ))}
+                </ul>
+              )}
+              <p className="mt-1 text-[10px] text-slate-400">
+                Access is patient-controlled and revocable at any time; every record view is logged in
+                the in-app audit trail.
+              </p>
+            </>
+          )}
+
           <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
             Adherence — last {adherence?.window_days ?? 14} days
           </h2>
@@ -359,7 +428,8 @@ function ReportInner() {
             Sources: product identification from Health Canada&apos;s Drug Product Database (queried
             live); conflict screening from a curated demonstration ruleset (v{RULESET_VERSION}) and
             the DDInter open-access dataset where imported (each alert cites its source) — not a
-            licensed clinical interaction database.
+            licensed clinical interaction database. Exposure windows: {EXPOSURE_VERSION} (typical
+            adult half-lives / effect durations).
             Generated by GanderMed, a prototype. This report is informational, may be
             incomplete, and is not medical advice. Medication decisions should only be made with a
             pharmacist or prescriber.

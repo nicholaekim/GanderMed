@@ -41,6 +41,7 @@ export interface InvitationRow {
   intake_started_at: string | null;
   submitted_at: string | null;
   consented_at: string | null;
+  reviewed_at: string | null;
   patient_note: string | null;
   profile_id: number | null;
   grant_id: number | null;
@@ -109,7 +110,7 @@ const TRANSITIONS: Record<string, { from: InvitationStatus[]; stamp?: string }> 
   intake_submitted: { from: ["intake_started"], stamp: "submitted_at" },
   consented: { from: ["intake_submitted"], stamp: "consented_at" },
   denied: { from: ["intake_submitted"], stamp: "consented_at" },
-  reviewed: { from: ["consented"] },
+  reviewed: { from: ["consented"], stamp: "reviewed_at" },
   cancelled: { from: ["created", "opened", "intake_started", "intake_submitted"] },
 };
 

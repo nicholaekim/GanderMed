@@ -6,7 +6,7 @@
     "dev": "node --use-system-ca node_modules/next/dist/bin/next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test tests/normalize.test.ts tests/conflicts.test.ts tests/exposure.test.ts tests/alert-lifecycle.test.ts tests/dpd-integrity.test.ts tests/auth.test.ts tests/access.test.ts tests/invitations.test.ts tests/medication-editing.test.ts tests/adherence.test.ts tests/reconcile.test.ts",
+    "test": "node --import tsx --test tests/normalize.test.ts tests/conflicts.test.ts tests/exposure.test.ts tests/alert-lifecycle.test.ts tests/dpd-integrity.test.ts tests/auth.test.ts tests/access.test.ts tests/invitations.test.ts tests/medication-editing.test.ts tests/adherence.test.ts tests/reconcile.test.ts tests/metrics.test.ts",
     "import:ddinter": "node --import tsx scripts/import-ddinter.ts"
   },
   "dependencies": {

@@ -18,17 +18,10 @@ import { recomputeAlerts } from "@/lib/conflicts";
 import { attachReviews } from "@/lib/reviews";
 import { computeAdherence } from "@/lib/adherence";
 import { logAudit } from "@/lib/access";
-import type { Medication } from "@/lib/types";
+import { DISPOSITION_LABELS, type Disposition, type Medication } from "@/lib/types";
 
-export type Disposition = "confirmed" | "resolved" | "follow_up" | "patient_unsure" | "referred";
-
-export const DISPOSITIONS: Record<Disposition, string> = {
-  confirmed: "Confirmed correct as listed",
-  resolved: "Discrepancy resolved",
-  follow_up: "Needs follow-up",
-  patient_unsure: "Patient unsure — recheck",
-  referred: "Referred to prescriber",
-};
+export type { Disposition };
+export const DISPOSITIONS = DISPOSITION_LABELS;
 
 export interface DiscrepancyFlag {
   code:

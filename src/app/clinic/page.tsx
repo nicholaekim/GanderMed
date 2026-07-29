@@ -7,6 +7,7 @@ import type { Me, PendingRequest, RosterEntry } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
 import InvitationsPanel from "@/components/InvitationsPanel";
+import MetricsPanel from "@/components/MetricsPanel";
 
 const PURPOSES = ["Medication review", "MedsCheck preparation", "Post-discharge reconciliation", "Other"];
 
@@ -245,6 +246,8 @@ export default function ClinicPage() {
           </div>
         )}
       </section>
+
+      <MetricsPanel />
 
       <footer className="mt-10 border-t border-slate-200 pt-4 text-[11px] leading-relaxed text-slate-400">
         Prototype — conflict screening uses a demonstration ruleset, not a licensed clinical

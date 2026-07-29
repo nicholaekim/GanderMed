@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS patient_invitations (
   intake_started_at TEXT,
   submitted_at TEXT,
   consented_at TEXT,
+  reviewed_at TEXT,
   patient_note TEXT,
   profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
   grant_id INTEGER REFERENCES access_grants(id) ON DELETE SET NULL
@@ -360,6 +361,11 @@ function migrateColumns(db: DatabaseSync) {
   }
   try {
     db.exec("ALTER TABLE medications ADD COLUMN last_material_change_at TEXT");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE patient_invitations ADD COLUMN reviewed_at TEXT");
   } catch {
     // column already exists
   }
