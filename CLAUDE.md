@@ -52,6 +52,7 @@ Canadian medication logger with drug-conflict detection (formerly "Drug Conflict
 ## Exposure engine (v0.2)
 
 - `src/lib/exposure.ts` + `src/data/ingredientProfiles.ts`: estimated active windows and rolling 24h mg totals, computed at read time (they decay — never persist them). Only ingredients with a profile row get windows/totals; extended-release products (`is_extended_release`, regex-detected from brand/form) get totals but no windows.
+- **Half-life model (v2 profiles)**: each profile stores `half_life_hours` + `window_basis`. Basis `half_life` ⇒ `active_window_hours` MUST equal `round(5 × t½)` (washout convention, ~97% eliminated — deliberately conservative for overlap; enforced by a data-integrity test). Basis `effect_duration` ⇒ the clinical effect outlasts elimination (aspirin's irreversible antiplatelet ~7–10 d, warfarin's factor synthesis, nitrate-separation labels, fluoxetine's norfluoxetine metabolite) and the note MUST explain why (also test-enforced). The exposure LOOKBACK is derived from the longest window in the data — never hand-maintain it. Basis + t½ are surfaced in ExposurePanel and the chat record; bump `EXPOSURE_VERSION` to reseed after any profile change.
 - Alert `exposure_status` is computed per read, not stored. Alert ingredient pairs are sorted alphabetically but med ids numerically — annotation must check BOTH med↔ingredient orientations (this was a real bug once).
 - Uncountable doses (unit mismatch, mg-of-combination-product) go to `uncounted` with a reason; never silently drop or estimate them.
 

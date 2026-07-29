@@ -4,12 +4,18 @@
 // the clinician delivers the link themselves.
 
 import { NextResponse } from "next/server";
+import type { DatabaseSync } from "node:sqlite";
 import { getDb } from "@/lib/db";
-import { getUserFromRequest } from "@/lib/auth";
+import { getUserFromRequest, type SessionUser } from "@/lib/auth";
 import { ACCESS_PURPOSES } from "@/lib/access";
 import { createInvitation, listInvitations } from "@/lib/invitations";
 
-function requireClinician(request: Request) {
+// The explicit union annotation matters: without it TS normalizes the
+// returns into optional-property object types and `"fail" in auth` stops
+// discriminating (auth.fail becomes `NextResponse | undefined`).
+function requireClinician(
+  request: Request
+): { fail: NextResponse } | { db: DatabaseSync; user: SessionUser } {
   const db = getDb();
   const user = getUserFromRequest(db, request);
   if (!user) return { fail: NextResponse.json({ error: "Not signed in." }, { status: 401 }) };

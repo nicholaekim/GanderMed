@@ -113,6 +113,10 @@ export interface RollingTotal {
 export interface ActiveIngredient {
   ingredient: string;
   until: string;
+  /** Typical adult elimination half-life the window was derived from (null for old data). */
+  half_life_hours: number | null;
+  /** "half_life" = ≈5×t½ washout; "effect_duration" = clinical effect outlasts elimination. */
+  window_basis: "half_life" | "effect_duration";
   sources: { brand_name: string; until: string }[];
 }
 

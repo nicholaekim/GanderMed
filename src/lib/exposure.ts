@@ -18,19 +18,23 @@ import type {
   Medication,
   RollingTotal,
 } from "@/lib/types";
-import { EXPOSURE_VERSION } from "@/data/ingredientProfiles";
+import { EXPOSURE_VERSION, INGREDIENT_PROFILES } from "@/data/ingredientProfiles";
 import { getMedicationsWithIngredients } from "@/lib/conflicts";
 
 const HOUR_MS = 3_600_000;
 const ROLLING_WINDOW_MS = 24 * HOUR_MS;
-// Look back far enough to catch the longest profile window (fluoxetine 96h).
-const LOOKBACK_MS = 120 * HOUR_MS;
+// Look back far enough to catch the longest profile window (derived from the
+// data so a new long-half-life ingredient can never silently fall outside it).
+const LOOKBACK_MS =
+  (Math.max(...Object.values(INGREDIENT_PROFILES).map((p) => p.active_window_hours)) + 24) * HOUR_MS;
 
 const COUNTABLE_UNITS = new Set(["tablet(s)", "capsule(s)"]);
 
 interface ProfileRow {
   canonical_name: string;
   active_window_hours: number;
+  half_life_hours: number | null;
+  window_basis: "half_life" | "effect_duration";
   max_daily_mg: number | null;
   note: string | null;
 }
@@ -109,7 +113,10 @@ export function computeExposure(db: DatabaseSync, profileId: number): ExposureCo
 
   const activeKeys = new Set<string>();
   const dosedMedIds = new Set<number>();
-  const activeUntil = new Map<string, { until: number; sources: Map<string, number> }>(); // ingredient -> latest end
+  const activeUntil = new Map<
+    string,
+    { until: number; sources: Map<string, number>; profile: ProfileRow }
+  >(); // ingredient -> latest end
   const totals = new Map<string, RollingTotal>();
 
   for (const ev of events) {
@@ -151,7 +158,7 @@ export function computeExposure(db: DatabaseSync, profileId: number): ExposureCo
         const end = takenAt + profile.active_window_hours * HOUR_MS;
         if (end > now) {
           activeKeys.add(`${med.id}|${name}`);
-          if (!activeUntil.has(name)) activeUntil.set(name, { until: end, sources: new Map() });
+          if (!activeUntil.has(name)) activeUntil.set(name, { until: end, sources: new Map(), profile });
           const a = activeUntil.get(name)!;
           a.until = Math.max(a.until, end);
           a.sources.set(med.brand_name, Math.max(a.sources.get(med.brand_name) ?? 0, end));
@@ -170,6 +177,8 @@ export function computeExposure(db: DatabaseSync, profileId: number): ExposureCo
     .map(([ingredient, a]) => ({
       ingredient,
       until: new Date(a.until).toISOString(),
+      half_life_hours: a.profile.half_life_hours,
+      window_basis: a.profile.window_basis,
       sources: [...a.sources.entries()].map(([brand_name, until]) => ({
         brand_name,
         until: new Date(until).toISOString(),

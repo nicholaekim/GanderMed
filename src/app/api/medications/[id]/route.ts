@@ -7,7 +7,9 @@ import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-function authorize(request: Request) {
+function authorize(
+  request: Request
+): { fail: NextResponse } | { db: ReturnType<typeof getDb>; profileId: number } {
   const db = getDb();
   const user = getUserFromRequest(db, request);
   if (!user) return { fail: NextResponse.json({ error: "Not signed in." }, { status: 401 }) };

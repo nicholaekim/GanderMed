@@ -16,7 +16,8 @@ import { PATCH as patchMedication } from "../src/app/api/medications/[id]/route"
 import { createUserSession, jsonRequest, useTestDb } from "./helpers";
 import type { DatabaseSync } from "node:sqlite";
 
-const ctx = (v: string) => ({ params: Promise.resolve(v.startsWith("/") ? { id: v.slice(1) } : { token: v }) });
+const tokenCtx = (token: string) => ({ params: Promise.resolve({ token }) });
+const idCtx = (id: number | string) => ({ params: Promise.resolve({ id: String(id) }) });
 
 async function mintInvitation(
   clinicianCookie: string,
@@ -41,10 +42,10 @@ function invitationStatus(db: DatabaseSync, id: number): string {
 
 /** Walk an invitation to intake_submitted as the given patient. */
 async function walkToSubmitted(token: string, patientCookie: string): Promise<void> {
-  await intakeMetaRoute(jsonRequest(`/api/intake/${token}`), ctx(token));
+  await intakeMetaRoute(jsonRequest(`/api/intake/${token}`), tokenCtx(token));
   const start = await intakeStartRoute(
     jsonRequest(`/api/intake/${token}/start`, { method: "POST", cookie: patientCookie }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(start.status, 200);
   const submit = await intakeSubmitRoute(
@@ -53,7 +54,7 @@ async function walkToSubmitted(token: string, patientCookie: string): Promise<vo
       cookie: patientCookie,
       body: { patient_note: "I split the evening tablet" },
     }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(submit.status, 200);
 }
@@ -83,7 +84,7 @@ test("viewing the link reveals only who/why and flips created → opened", async
   const { cookie } = createUserSession(db, "clinician");
   const { token, id } = await mintInvitation(cookie);
 
-  const res = await intakeMetaRoute(jsonRequest(`/api/intake/${token}`), ctx(token));
+  const res = await intakeMetaRoute(jsonRequest(`/api/intake/${token}`), tokenCtx(token));
   assert.equal(res.status, 200);
   const meta = await res.json();
   assert.equal(meta.status, "opened");
@@ -99,7 +100,7 @@ test("a tampered token 404s without leaking anything", async () => {
   const { cookie } = createUserSession(db, "clinician");
   const { token } = await mintInvitation(cookie);
   const wrong = token.slice(0, -2) + (token.endsWith("aa") ? "bb" : "aa");
-  const res = await intakeMetaRoute(jsonRequest(`/api/intake/${wrong}`), ctx(wrong));
+  const res = await intakeMetaRoute(jsonRequest(`/api/intake/${wrong}`), tokenCtx(wrong));
   assert.equal(res.status, 404);
 });
 
@@ -113,13 +114,13 @@ test("EXPIRY: past-expiry links die lazily and cannot be started", async () => {
     id
   );
 
-  const meta = await intakeMetaRoute(jsonRequest(`/api/intake/${token}`), ctx(token));
+  const meta = await intakeMetaRoute(jsonRequest(`/api/intake/${token}`), tokenCtx(token));
   assert.equal((await meta.json()).status, "expired");
   assert.equal(invitationStatus(db, id), "expired");
 
   const start = await intakeStartRoute(
     jsonRequest(`/api/intake/${token}/start`, { method: "POST", cookie: patient.cookie }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(start.status, 410);
 });
@@ -132,14 +133,14 @@ test("CANCELLATION: the clinician can kill an open link; replay is refused", asy
 
   const cancel = await invitationActionRoute(
     jsonRequest(`/api/invitations/${id}`, { method: "POST", cookie, body: { action: "cancel" } }),
-    ctx(`/${id}`)
+    idCtx(id)
   );
   assert.equal(cancel.status, 200);
   assert.equal(invitationStatus(db, id), "cancelled");
 
   const start = await intakeStartRoute(
     jsonRequest(`/api/intake/${token}/start`, { method: "POST", cookie: patient.cookie }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(start.status, 410);
 });
@@ -152,7 +153,7 @@ test("only the owning clinician can act on an invitation", async () => {
 
   const res = await invitationActionRoute(
     jsonRequest(`/api/invitations/${id}`, { method: "POST", cookie: other.cookie, body: { action: "cancel" } }),
-    ctx(`/${id}`)
+    idCtx(id)
   );
   assert.equal(res.status, 404, "other clinicians can't even see it");
 });
@@ -166,20 +167,20 @@ test("CLAIM: first patient wins; a second account is turned away", async () => {
 
   const start1 = await intakeStartRoute(
     jsonRequest(`/api/intake/${token}/start`, { method: "POST", cookie: first.cookie }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(start1.status, 200);
   assert.equal(invitationStatus(db, id), "intake_started");
 
   const start2 = await intakeStartRoute(
     jsonRequest(`/api/intake/${token}/start`, { method: "POST", cookie: second.cookie }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(start2.status, 409);
 
   const submit2 = await intakeSubmitRoute(
     jsonRequest(`/api/intake/${token}/submit`, { method: "POST", cookie: second.cookie, body: {} }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(submit2.status, 409, "the other account can't submit either");
 });
@@ -189,11 +190,11 @@ test("intake steps require a signed-in patient (clinicians and anonymous are ref
   const clin = createUserSession(db, "clinician");
   const { token } = await mintInvitation(clin.cookie);
 
-  const anon = await intakeStartRoute(jsonRequest(`/api/intake/${token}/start`, { method: "POST" }), ctx(token));
+  const anon = await intakeStartRoute(jsonRequest(`/api/intake/${token}/start`, { method: "POST" }), tokenCtx(token));
   assert.equal(anon.status, 401);
   const asClin = await intakeStartRoute(
     jsonRequest(`/api/intake/${token}/start`, { method: "POST", cookie: clin.cookie }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(asClin.status, 403);
 });
@@ -207,7 +208,7 @@ test("CONSENT DENIED: nothing is shared and the link is finished", async () => {
 
   const consent = await intakeConsentRoute(
     jsonRequest(`/api/intake/${token}/consent`, { method: "POST", cookie: patient.cookie, body: { approve: false } }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(consent.status, 200);
   assert.equal(invitationStatus(db, id), "denied");
@@ -222,7 +223,7 @@ test("CONSENT DENIED: nothing is shared and the link is finished", async () => {
 
   const replay = await intakeConsentRoute(
     jsonRequest(`/api/intake/${token}/consent`, { method: "POST", cookie: patient.cookie, body: { approve: true } }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(replay.status, 410, "a decided invitation cannot be re-decided");
 });
@@ -241,7 +242,7 @@ test("CONSENT APPROVED: an active, expiring grant opens the record for the invit
       cookie: patient.cookie,
       body: { approve: true, expires_days: 90 },
     }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(consent.status, 200);
   const decided = await consent.json();
@@ -278,7 +279,7 @@ test("CONSENT APPROVED: an active, expiring grant opens the record for the invit
   // writes — an approved link cannot be replayed into a different decision.
   const replay = await intakeConsentRoute(
     jsonRequest(`/api/intake/${token}/consent`, { method: "POST", cookie: patient.cookie, body: { approve: false } }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(replay.status, 410);
 });
@@ -297,7 +298,7 @@ test("approving via intake reuses a pre-existing open grant instead of violating
   await walkToSubmitted(token, patient.cookie);
   const consent = await intakeConsentRoute(
     jsonRequest(`/api/intake/${token}/consent`, { method: "POST", cookie: patient.cookie, body: { approve: true } }),
-    ctx(token)
+    tokenCtx(token)
   );
   assert.equal(consent.status, 200);
 
@@ -315,18 +316,18 @@ test("mark_reviewed closes the loop, but only from consented", async () => {
 
   const early = await invitationActionRoute(
     jsonRequest(`/api/invitations/${id}`, { method: "POST", cookie: clin.cookie, body: { action: "mark_reviewed" } }),
-    ctx(`/${id}`)
+    idCtx(id)
   );
   assert.equal(early.status, 409, "cannot review before consent");
 
   await walkToSubmitted(token, patient.cookie);
   await intakeConsentRoute(
     jsonRequest(`/api/intake/${token}/consent`, { method: "POST", cookie: patient.cookie, body: { approve: true } }),
-    ctx(token)
+    tokenCtx(token)
   );
   const done = await invitationActionRoute(
     jsonRequest(`/api/invitations/${id}`, { method: "POST", cookie: clin.cookie, body: { action: "mark_reviewed" } }),
-    ctx(`/${id}`)
+    idCtx(id)
   );
   assert.equal(done.status, 200);
   assert.equal(invitationStatus(db, id), "reviewed");
@@ -363,7 +364,7 @@ test("ACTUAL USE: patients can record how they really take a med; clinicians can
       cookie: patient.cookie,
       body: { actual_use: "taking_differently", patient_notes: "only half a tablet" },
     }),
-    ctx(`/${medId}`)
+    idCtx(medId)
   );
   assert.equal(patch.status, 200);
   const row = db.prepare("SELECT actual_use, patient_notes, status FROM medications WHERE id = ?").get(medId) as {
@@ -377,7 +378,7 @@ test("ACTUAL USE: patients can record how they really take a med; clinicians can
 
   const bad = await patchMedication(
     jsonRequest(`/api/medications/${medId}`, { method: "PATCH", cookie: patient.cookie, body: { actual_use: "nope" } }),
-    ctx(`/${medId}`)
+    idCtx(medId)
   );
   assert.equal(bad.status, 400);
 
@@ -387,7 +388,7 @@ test("ACTUAL USE: patients can record how they really take a med; clinicians can
       cookie: clin.cookie,
       body: { actual_use: "not_taking" },
     }),
-    ctx(`/${medId}`)
+    idCtx(medId)
   );
   assert.equal(clinPatch.status, 403, "clinician writes stay forbidden");
 });
@@ -400,7 +401,7 @@ test("AUDIT: the invitation lifecycle lands in audit_events", async () => {
   await walkToSubmitted(token, patient.cookie);
   await intakeConsentRoute(
     jsonRequest(`/api/intake/${token}/consent`, { method: "POST", cookie: patient.cookie, body: { approve: true } }),
-    ctx(token)
+    tokenCtx(token)
   );
 
   const actions = (db.prepare("SELECT action FROM audit_events ORDER BY id").all() as { action: string }[]).map(

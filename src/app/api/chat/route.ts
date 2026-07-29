@@ -125,6 +125,11 @@ export async function POST(request: Request) {
     estimated_exposure_now: exposure.report.active_now.map((x) => ({
       ingredient: x.ingredient,
       active_until: x.until,
+      typical_half_life_hours: x.half_life_hours,
+      window_basis:
+        x.window_basis === "effect_duration"
+          ? "clinical effect outlasts drug elimination"
+          : "washout estimate (about 5 half-lives)",
     })),
     rolling_24h_totals: exposure.report.totals.map((t) => ({
       ingredient: t.ingredient,

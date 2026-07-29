@@ -180,6 +180,8 @@ CREATE INDEX IF NOT EXISTS idx_reviews_profile ON alert_reviews(profile_id);
 CREATE TABLE IF NOT EXISTS ingredient_profiles (
   canonical_name TEXT PRIMARY KEY,
   active_window_hours REAL NOT NULL,
+  half_life_hours REAL,
+  window_basis TEXT NOT NULL DEFAULT 'half_life',
   max_daily_mg REAL,
   note TEXT,
   source_version TEXT NOT NULL
@@ -249,11 +251,12 @@ function seedIngredientProfiles(db: DatabaseSync) {
   try {
     db.prepare("DELETE FROM ingredient_profiles").run();
     const insert = db.prepare(
-      `INSERT INTO ingredient_profiles (canonical_name, active_window_hours, max_daily_mg, note, source_version)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO ingredient_profiles
+       (canonical_name, active_window_hours, half_life_hours, window_basis, max_daily_mg, note, source_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     for (const [name, p] of Object.entries(INGREDIENT_PROFILES)) {
-      insert.run(name, p.active_window_hours, p.max_daily_mg, p.note, EXPOSURE_VERSION);
+      insert.run(name, p.active_window_hours, p.half_life_hours, p.window_basis, p.max_daily_mg, p.note, EXPOSURE_VERSION);
     }
     db.exec("COMMIT");
   } catch (e) {
@@ -301,6 +304,18 @@ function migrateColumns(db: DatabaseSync) {
   }
   try {
     db.exec("ALTER TABLE medications ADD COLUMN patient_notes TEXT");
+  } catch {
+    // column already exists
+  }
+  // Existing rows get real values on the next seedIngredientProfiles run —
+  // the EXPOSURE_VERSION bump forces a full reseed.
+  try {
+    db.exec("ALTER TABLE ingredient_profiles ADD COLUMN half_life_hours REAL");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE ingredient_profiles ADD COLUMN window_basis TEXT NOT NULL DEFAULT 'half_life'");
   } catch {
     // column already exists
   }

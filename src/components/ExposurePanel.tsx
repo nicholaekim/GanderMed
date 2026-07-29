@@ -21,14 +21,25 @@ export default function ExposurePanel({ exposure }: { exposure: ExposureReport |
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
             Estimated active ingredients
           </p>
-          <ul className="mt-1.5 space-y-1">
+          <ul className="mt-1.5 space-y-1.5">
             {active_now.map((a) => (
-              <li key={a.ingredient} className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="font-medium">{titleCase(a.ingredient)}</span>
-                <span className="text-xs text-slate-500">
-                  active until ~{fmtWhen(a.until)}
-                  {a.sources.length > 1 ? ` · ${a.sources.length} products` : ""}
-                </span>
+              <li key={a.ingredient} className="text-sm">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-medium">{titleCase(a.ingredient)}</span>
+                  <span className="text-xs text-slate-500">
+                    active until ~{fmtWhen(a.until)}
+                    {a.sources.length > 1 ? ` · ${a.sources.length} products` : ""}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {a.window_basis === "effect_duration"
+                    ? a.half_life_hours != null
+                      ? `Half-life ~${a.half_life_hours} h, but the clinical effect lasts longer — window models the effect`
+                      : "Window models the clinical effect duration"
+                    : a.half_life_hours != null
+                      ? `Based on a ~${a.half_life_hours} h half-life (≈5 half-lives to washout)`
+                      : "Estimated window"}
+                </p>
               </li>
             ))}
           </ul>
@@ -84,9 +95,10 @@ export default function ExposurePanel({ exposure }: { exposure: ExposureReport |
       )}
 
       <p className="mt-3 border-t border-slate-100 pt-2 text-[10px] leading-relaxed text-slate-400">
-        Demo exposure windows ({exposure.version}); duration varies by person and formulation.
-        Extended-release products aren&apos;t window-modeled. Totals only include doses logged in this
-        app.
+        Windows use typical adult half-lives (≈5 half-lives to washout) or known effect durations
+        ({exposure.version}); your own clearance varies with age, kidney/liver function, and other
+        medications. Extended-release products aren&apos;t window-modeled. Totals only include doses
+        logged in this app.
       </p>
     </section>
   );
