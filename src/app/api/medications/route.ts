@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { DpdVerifyError, getVerifiedProduct, type VerifiedProduct } from "@/lib/dpd";
+import { DPD_VERIFY_MESSAGES, DpdVerifyError, getVerifiedProduct, type VerifiedProduct } from "@/lib/dpd";
 import { getMedicationsWithIngredients, recomputeAlerts } from "@/lib/conflicts";
 import { annotateAlertsWithExposure, computeExposure } from "@/lib/exposure";
 import { attachReviews } from "@/lib/reviews";
@@ -68,15 +68,7 @@ export async function POST(request: Request) {
       verified = await getVerifiedProduct(body.drug_code!);
     } catch (e) {
       if (e instanceof DpdVerifyError) {
-        const messages: Record<string, string> = {
-          not_found: "Health Canada has no product with that identifier.",
-          not_human: "That product isn't a human medication, so it can't be added as a verified product.",
-          not_marketed:
-            "That product isn't currently marketed in Canada, so it can't be safety-checked. Add it as an unverified entry if you still take it.",
-          no_ingredients:
-            "Health Canada lists no active ingredients for this product, so it cannot be safety-checked. Add it as an unverified entry instead.",
-        };
-        return NextResponse.json({ error: messages[e.code] }, { status: 422 });
+        return NextResponse.json({ error: DPD_VERIFY_MESSAGES[e.code] }, { status: 422 });
       }
       console.error("DPD verification failed:", e);
       return NextResponse.json(

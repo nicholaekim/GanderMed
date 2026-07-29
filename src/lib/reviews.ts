@@ -42,18 +42,36 @@ export function attachReviews(db: DatabaseSync, profileId: number, alerts: Alert
     .all(profileId, new Date().toISOString()) as unknown as ReviewRow[];
   const byKey = new Map(rows.map((r) => [identityKey(r), r]));
 
+  // Dose/schedule edits don't break review identity (the product combination
+  // is unchanged), but the review must carry a "dose changed since" warning.
+  // Both timestamps are SQLite datetime('now') strings, so lexical compare
+  // is safe.
+  const changeStamps = new Map(
+    (
+      db
+        .prepare("SELECT id, last_material_change_at FROM medications WHERE profile_id = ?")
+        .all(profileId) as unknown as { id: number; last_material_change_at: string | null }[]
+    ).map((m) => [m.id, m.last_material_change_at])
+  );
+
   for (const a of alerts) {
     const r = byKey.get(identityKey(a));
-    a.review = r
-      ? {
-          id: r.id,
-          note: r.note,
-          reviewer_name: r.reviewer_name,
-          reviewer_clinic: r.reviewer_clinic,
-          created_at: r.created_at,
-          expires_at: r.expires_at,
-        }
-      : null;
+    if (!r) {
+      a.review = null;
+      continue;
+    }
+    const stamps = [changeStamps.get(a.med_a_id), changeStamps.get(a.med_b_id)].filter(
+      (s): s is string => !!s && s > r.created_at
+    );
+    a.review = {
+      id: r.id,
+      note: r.note,
+      reviewer_name: r.reviewer_name,
+      reviewer_clinic: r.reviewer_clinic,
+      created_at: r.created_at,
+      expires_at: r.expires_at,
+      dose_changed_at: stamps.length ? stamps.sort().at(-1)! : null,
+    };
   }
   return alerts;
 }

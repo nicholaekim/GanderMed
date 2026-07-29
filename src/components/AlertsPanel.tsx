@@ -65,6 +65,13 @@ function ReviewBand({
         {fmtDate(r.expires_at)}
       </p>
       <p className="mt-1 text-xs italic text-teal-900">&ldquo;{r.note}&rdquo;</p>
+      {r.dose_changed_at && (
+        <p className="mt-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-900">
+          ⚠ Dose or schedule changed {fmtDate(r.dose_changed_at)} — after this review was written. The
+          review still applies to the product combination, but the change is worth re-confirming with
+          your care team.
+        </p>
+      )}
       <p className="mt-1 text-[10px] text-teal-700/80">
         Re-alerts automatically if the products change, the ruleset updates, or this review expires.
       </p>

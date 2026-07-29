@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS medications (
   actual_use TEXT NOT NULL DEFAULT 'taking' CHECK (actual_use IN
     ('taking','not_taking','taking_differently','recently_stopped','unsure')),
   patient_notes TEXT,
+  provenance TEXT NOT NULL DEFAULT 'patient-reported' CHECK (provenance IN
+    ('patient-reported','imported','pharmacy-confirmed','prescriber-listed','discharge-list','unknown')),
+  last_material_change_at TEXT,
+  replaced_by_id INTEGER REFERENCES medications(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -304,6 +308,24 @@ function migrateColumns(db: DatabaseSync) {
   }
   try {
     db.exec("ALTER TABLE medications ADD COLUMN patient_notes TEXT");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec(
+      `ALTER TABLE medications ADD COLUMN provenance TEXT NOT NULL DEFAULT 'patient-reported' CHECK (provenance IN
+       ('patient-reported','imported','pharmacy-confirmed','prescriber-listed','discharge-list','unknown'))`
+    );
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE medications ADD COLUMN last_material_change_at TEXT");
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec("ALTER TABLE medications ADD COLUMN replaced_by_id INTEGER REFERENCES medications(id)");
   } catch {
     // column already exists
   }

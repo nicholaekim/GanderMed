@@ -11,7 +11,7 @@ export interface AddResult {
   alerts: Alert[];
 }
 
-const DOSE_UNITS = ["tablet(s)", "capsule(s)", "mg", "mL", "puff(s)", "drop(s)", "unit(s)", "patch(es)"];
+export const DOSE_UNITS = ["tablet(s)", "capsule(s)", "mg", "mL", "puff(s)", "drop(s)", "unit(s)", "patch(es)"];
 
 export default function AddMedication({ onAdded }: { onAdded: (res: AddResult) => void }) {
   const [q, setQ] = useState("");

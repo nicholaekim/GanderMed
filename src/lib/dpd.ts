@@ -101,6 +101,16 @@ export class DpdVerifyError extends Error {
   }
 }
 
+/** User-facing copy for each verification failure, shared by add + replace. */
+export const DPD_VERIFY_MESSAGES: Record<DpdVerifyCode, string> = {
+  not_found: "Health Canada has no product with that identifier.",
+  not_human: "That product isn't a human medication, so it can't be added as a verified product.",
+  not_marketed:
+    "That product isn't currently marketed in Canada, so it can't be safety-checked. Add it as an unverified entry if you still take it.",
+  no_ingredients:
+    "Health Canada lists no active ingredients for this product, so it cannot be safety-checked. Add it as an unverified entry instead.",
+};
+
 export interface VerifiedProduct {
   drug_code: number;
   din: string;

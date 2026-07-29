@@ -231,6 +231,7 @@ export default function Dashboard() {
               onStop={(id) => setStatus(id, "stopped")}
               onResume={(id) => setStatus(id, "active")}
               onDelete={deleteMed}
+              onChanged={loadAll}
             />
             <HistoryList events={events} />
           </div>

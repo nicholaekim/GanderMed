@@ -25,19 +25,13 @@ Remaining slice deferred to Phase 5: invitations carry an
 individual clinician account. Email/SMS delivery stays out until a provider
 is configured — links are handed over in person/printed/QR.
 
-## Phase 7 — Medication editing and provenance
-- DONE early (with Phase 6): `actual_use` status + `patient_notes` columns,
-  patient-only PATCH, amber badges in med list/report, intake editor.
-- PATCH for dose/unit/schedule/PRN/instructions/dates.
-- Verified DPD identity is immutable — product replacement is an explicit
-  replace action (delete+add semantics with history retained).
-- Provenance enum: patient-reported / imported / pharmacy-confirmed /
-  prescriber-listed / discharge-list / unknown.
-- Decide and TEST the review-invalidation rule for dose changes. Recommended:
-  dose/schedule edits re-run recompute (alerts re-fingerprint automatically);
-  clinician reviews stay attached because the review targets the product
-  combination — but the review banner must display "dose changed since this
-  review" with the change date. Document whatever is chosen.
+## Phase 7 — DONE (see CLAUDE.md "Medication editing & provenance")
+Editing PATCH, immutable identity, explicit Replace (stop-and-retain +
+re-alert), provenance enum (server-owned, default patient-reported), and the
+tested review-invalidation rule (reviews survive dose edits but carry a
+"dose changed since this review" warning; replacement detaches). Remaining
+for later phases: setting pharmacy-confirmed provenance is a Phase 10
+reconciliation disposition.
 
 ## Phase 8 — Real adherence
 - Deterministic expected-slot generation (schedule × start/end dates × window

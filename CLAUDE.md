@@ -26,6 +26,13 @@ Canadian medication logger with drug-conflict detection (formerly "Drug Conflict
 - Phase 7 slice pulled forward: `medications.actual_use` ('taking'|'not_taking'|'taking_differently'|'recently_stopped'|'unsure') + `patient_notes`, patient-only via PATCH `/api/medications/[id]` — provenance display only (amber badges, report callouts), never a safety signal.
 - Login supports `?next=` (validated: leading `/`, no `//` or `\`) through password, register, and Google (rides the `dcai_oauth` state cookie).
 
+## Medication editing & provenance (v0.10, Phase 7)
+
+- PATCH `/api/medications/[id]` (patient-only) edits usage: dose_value/dose_unit/is_prn/schedule_times/start_date/instructions (+status/actual_use/patient_notes from earlier). **Product identity is immutable** (brand/DIN/drug_code/company/route/form/verified/ER) — explicit 400; `provenance`/`last_material_change_at`/`replaced_by_id` are server-owned, also 400.
+- **Replace** (`POST /api/medications/[id]/replace` {drug_code}): DPD-verifies the new product, stops+retains the old row (end_date, `replaced_by_id` link, dose history stays put), new row inherits usage fields, start_date=today. One replace per row (409 after). New med id ⇒ review identity breaks ⇒ pair re-alerts — by design.
+- **Review-invalidation rule (decided + tested)**: dose/schedule edits (dose_value, dose_unit, is_prn, schedule_times — value must actually differ) stamp `medications.last_material_change_at` (SQLite datetime — same format as review created_at, lexically comparable). attachReviews keeps the review attached (combination unchanged) but sets `review.dose_changed_at` when either med's stamp postdates the review; AlertsPanel shows an amber "dose changed since this review" banner. Product replacement is the only thing that detaches a review.
+- `medications.provenance` ('patient-reported' default | imported | pharmacy-confirmed | prescriber-listed | discharge-list | unknown) — server-owned display provenance; shown on the report. Phase 10 reconciliation will set pharmacy-confirmed.
+
 ## Alert reviews (v0.3)
 
 - `alert_reviews` + `src/lib/reviews.ts`: a clinician review is keyed to the combination identity (kind, med pair ids, ingredient pair, source_version) — NOT the alert row id, which is recreated on every recompute. `attachReviews` re-attaches only while identity holds → automatic re-alert on product change / ruleset bump / expiry. Reviews are soft-revoked (`revoked_at`), never deleted; a new review supersedes the previous one for the same combination.

@@ -10,6 +10,24 @@ export interface ProductIngredient {
   strength_unit: string | null;
 }
 
+/** Where this medication record came from. Server-owned — clients can never set it. */
+export type Provenance =
+  | "patient-reported"
+  | "imported"
+  | "pharmacy-confirmed"
+  | "prescriber-listed"
+  | "discharge-list"
+  | "unknown";
+
+export const PROVENANCE_LABELS: Record<Provenance, string> = {
+  "patient-reported": "Patient-reported",
+  imported: "Imported",
+  "pharmacy-confirmed": "Pharmacy-confirmed",
+  "prescriber-listed": "Prescriber-listed",
+  "discharge-list": "From a discharge list",
+  unknown: "Unknown source",
+};
+
 /** Patient-reported "how I actually take this" — provenance, never a safety signal. */
 export type ActualUse = "taking" | "not_taking" | "taking_differently" | "recently_stopped" | "unsure";
 
@@ -42,6 +60,9 @@ export interface Medication {
   status: "active" | "stopped";
   actual_use: ActualUse;
   patient_notes: string | null;
+  provenance: Provenance;
+  last_material_change_at: string | null;
+  replaced_by_id: number | null;
   created_at: string;
   ingredients: ProductIngredient[];
 }
@@ -92,6 +113,8 @@ export interface AlertReview {
   reviewer_clinic: string | null;
   created_at: string;
   expires_at: string;
+  /** Set when either medication's dose/schedule changed after this review was written. */
+  dose_changed_at?: string | null;
 }
 
 export interface ExposureSourceDose {
