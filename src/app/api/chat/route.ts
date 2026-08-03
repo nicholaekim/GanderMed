@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
 import { getMedicationsWithIngredients, recomputeAlerts } from "@/lib/conflicts";
+import { effectiveLifecycle, isPlanned, LIFECYCLE_LABELS } from "@/lib/lifecycle";
 import { annotateAlertsWithExposure, computeExposure } from "@/lib/exposure";
 import { attachReviews } from "@/lib/reviews";
 import { RULESET_VERSION } from "@/data/interactionRules";
@@ -82,7 +83,9 @@ export async function POST(request: Request) {
   const profile = db.prepare("SELECT name FROM profiles WHERE id = ?").get(profileId) as
     | { name: string }
     | undefined;
-  const meds = getMedicationsWithIngredients(db, profileId).filter((m) => m.status === "active");
+  const meds = getMedicationsWithIngredients(db, profileId).filter(
+    (m) => m.status === "active" || isPlanned(m)
+  );
   const { all } = recomputeAlerts(db, profileId);
   const exposure = computeExposure(db, profileId);
   annotateAlertsWithExposure(all, exposure);
@@ -102,11 +105,18 @@ export async function POST(request: Request) {
       dose: m.dose_value != null ? `${m.dose_value} ${m.dose_unit ?? ""}`.trim() : null,
       schedule: m.is_prn ? "as needed (PRN)" : JSON.parse(m.schedule_times || "[]"),
       route: m.route,
+      lifecycle: LIFECYCLE_LABELS[effectiveLifecycle(m)],
     })),
     alerts: all.map((a) => ({
       severity: a.severity,
       evidence: a.evidence,
       kind: a.kind,
+      concern:
+        a.concern_class === "planned"
+          ? "planned medication — the patient has not confirmed starting it"
+          : a.concern_class === "paused"
+            ? "involves a temporarily paused medication — not current exposure"
+            : "current use",
       between: [a.med_a_name, a.med_b_name],
       ingredients: a.kind === "duplicate" ? [a.ingredient_a] : [a.ingredient_a, a.ingredient_b],
       explanation: a.description,

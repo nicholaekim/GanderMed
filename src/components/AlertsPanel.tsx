@@ -171,13 +171,36 @@ function AlertCard({
           <span className="text-[11px] text-slate-500">
             Evidence: {EVIDENCE_LABEL[alert.evidence as Evidence] ?? alert.evidence}
           </span>
-          <ExposureBadge status={alert.exposure_status} />
+          {alert.concern_class === "planned" ? (
+            <span className="rounded-full border border-violet-300 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-800">
+              Planned medication — not started
+            </span>
+          ) : alert.concern_class === "paused" ? (
+            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+              Involves a paused medication
+            </span>
+          ) : (
+            <ExposureBadge status={alert.exposure_status} />
+          )}
         </div>
 
         <h3 className="mt-2 text-sm font-semibold">
           {titleCase(alert.med_a_name)} <span className="text-slate-400">+</span>{" "}
           {titleCase(alert.med_b_name)}
         </h3>
+        {alert.concern_class === "planned" && (
+          <p className="mt-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-1.5 text-xs text-violet-900">
+            Potential concern involving a newly prescribed medication. The patient has not confirmed
+            starting it, so this is not recorded active exposure — worth discussing before the first
+            dose.
+          </p>
+        )}
+        {alert.concern_class === "paused" && (
+          <p className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+            One of these medications is temporarily paused, so this is not current co-use — but the
+            combination becomes relevant again the moment it resumes.
+          </p>
+        )}
         <p className="text-xs text-slate-500">
           {alert.kind === "duplicate"
             ? `Both contain ${titleCase(alert.ingredient_a)}`

@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types";
 import { EXPOSURE_VERSION, INGREDIENT_PROFILES } from "@/data/ingredientProfiles";
 import { getMedicationsWithIngredients } from "@/lib/conflicts";
+import { inExposureWindows } from "@/lib/lifecycle";
 
 const HOUR_MS = 3_600_000;
 const ROLLING_WINDOW_MS = 24 * HOUR_MS;
@@ -105,7 +106,9 @@ export function computeExposure(db: DatabaseSync, profileId: number): ExposureCo
   // distinguish "no overlap recorded" from "we can't model this".
   const modelableKeys = new Set<string>();
   for (const m of meds) {
-    if (m.status !== "active" || m.is_extended_release) continue;
+    // Only confirmed current use is window-modeled: a planned medication has
+    // no doses in the body, and a paused one has no expected exposure.
+    if (!inExposureWindows(m) || m.is_extended_release) continue;
     for (const ing of m.ingredients) {
       if (profileByName.has(ing.canonical_name)) modelableKeys.add(`${m.id}|${ing.canonical_name}`);
     }

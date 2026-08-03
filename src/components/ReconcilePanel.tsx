@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Medication } from "@/lib/types";
 import type { DiscrepancyFlag, Disposition, SessionRow } from "@/lib/reconcile";
+import { inReconWorkspace } from "@/lib/lifecycle";
 import { titleCase } from "@/lib/normalize";
 import { fmtDate, fmtDateTime, scheduleLabel } from "@/lib/format";
 
@@ -32,6 +33,14 @@ const FLAG_STYLE: Record<string, string> = {
   patient_note: "border-sky-300 bg-sky-50 text-sky-900",
   supply_shortage: "border-amber-400 bg-amber-100 text-amber-900",
   supply_discontinued: "border-red-300 bg-red-50 text-red-800",
+  not_received: "border-violet-300 bg-violet-50 text-violet-900",
+  received_not_started: "border-violet-300 bg-violet-50 text-violet-900",
+  declined_to_start: "border-red-300 bg-red-50 text-red-800",
+  plan_cancelled: "border-slate-300 bg-slate-100 text-slate-700",
+  paused: "border-amber-300 bg-amber-50 text-amber-900",
+  dose_differs_from_prescription: "border-amber-400 bg-amber-100 text-amber-900",
+  schedule_differs_from_prescription: "border-amber-400 bg-amber-100 text-amber-900",
+  prescriber_instructions_missing: "border-slate-300 bg-slate-100 text-slate-700",
 };
 
 interface ItemView {
@@ -117,8 +126,12 @@ export default function ReconcilePanel({ patientId, meds }: { patientId: number;
     }
   }
 
-  const activeMeds = meds.filter((m) => m.status === "active");
-  const medById = new Map(activeMeds.map((m) => [m.id, m]));
+  // The workspace item list comes from the API (current + planned + plans
+  // needing follow-up); resolve details from the full med set. The start
+  // gate uses the SAME eligibility as the server's item list — a patient
+  // whose only meds are unconfirmed plans still needs reconciling.
+  const workspaceMeds = meds.filter((m) => inReconWorkspace(m));
+  const medById = new Map(meds.map((m) => [m.id, m]));
   const disposedCount = items.filter((i) => i.disposition).length;
 
   return (
@@ -134,7 +147,7 @@ export default function ReconcilePanel({ patientId, meds }: { patientId: number;
         {!session && (
           <button
             onClick={start}
-            disabled={busy || activeMeds.length === 0}
+            disabled={busy || workspaceMeds.length === 0}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
           >
             {lastCompleted ? "Start new reconciliation" : "Start reconciliation"}
@@ -203,6 +216,8 @@ export default function ReconcilePanel({ patientId, meds }: { patientId: number;
                   )}
                   {item.note && <p className="mt-1.5 text-[11px] italic text-slate-500">Note: {item.note}</p>}
 
+                  <MedHistory medId={item.medication_id} patientId={patientId} />
+
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     <select
                       value={draft.disposition}
@@ -267,5 +282,53 @@ export default function ReconcilePanel({ patientId, meds }: { patientId: number;
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * Per-medication lifecycle timeline (who did what, when), fetched lazily on
+ * expand from GET /api/medications/[id]/lifecycle.
+ */
+function MedHistory({ medId, patientId }: { medId: number; patientId: number }) {
+  const [events, setEvents] = useState<
+    { event_type: string; actor_role: string; actor_name: string | null; at: string }[] | null
+  >(null);
+  const [failed, setFailed] = useState(false);
+
+  async function loadEvents() {
+    if (events !== null || failed) return;
+    const res = await fetch(`/api/medications/${medId}/lifecycle?patient=${patientId}`);
+    if (!res.ok) {
+      setFailed(true);
+      return;
+    }
+    setEvents((await res.json()).events ?? []);
+  }
+
+  return (
+    <details className="mt-1.5" onToggle={(e) => (e.target as HTMLDetailsElement).open && loadEvents()}>
+      <summary className="cursor-pointer text-[11px] font-medium text-violet-700 hover:text-violet-900">
+        Lifecycle history
+      </summary>
+      {failed ? (
+        <p className="mt-1 text-[11px] text-slate-400">Could not load the timeline.</p>
+      ) : events === null ? (
+        <p className="mt-1 text-[11px] text-slate-400">Loading…</p>
+      ) : events.length === 0 ? (
+        <p className="mt-1 text-[11px] text-slate-400">No lifecycle events recorded (pre-lifecycle entry).</p>
+      ) : (
+        <ul className="mt-1 space-y-0.5 text-[11px] text-slate-600">
+          {events.map((e, i) => (
+            <li key={i}>
+              <span className="text-slate-400">{fmtDateTime(e.at)}</span> — {e.event_type.replace(/_/g, " ")}{" "}
+              <span className="text-slate-400">
+                ({e.actor_name ?? e.actor_role}
+                {e.actor_name ? `, ${e.actor_role}` : ""})
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }

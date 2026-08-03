@@ -5,6 +5,8 @@ import { annotateAlertsWithExposure, computeExposure } from "@/lib/exposure";
 import { attachReviews } from "@/lib/reviews";
 import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
 import { localDateTimeStr, recordScheduleChange } from "@/lib/adherence";
+import { effectiveLifecycle, isPlanned } from "@/lib/lifecycle";
+import { logMedEvent } from "@/lib/medevents";
 import type { Medication } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -23,21 +25,46 @@ const IMMUTABLE_FIELDS = [
   "ingredients",
 ] as const;
 
-// Server-owned bookkeeping the client may never write.
-const SERVER_OWNED_FIELDS = ["provenance", "last_material_change_at", "replaced_by_id", "profile_id", "created_at"] as const;
+// Server-owned bookkeeping the client may never write. The prescribed_*
+// block is the immutable prescription record (written once at plan
+// creation); lifecycle fields move only through the lifecycle route.
+const SERVER_OWNED_FIELDS = [
+  "provenance",
+  "last_material_change_at",
+  "replaced_by_id",
+  "profile_id",
+  "created_at",
+  "lifecycle_status",
+  "source_type",
+  "source_user_id",
+  "prescriber_name",
+  "prescriber_profession",
+  "prescriber_licence_number",
+  "prescribed_at",
+  "prescribed_dose_value",
+  "prescribed_dose_unit",
+  "prescribed_is_prn",
+  "prescribed_schedule_times",
+  "prescribed_instructions",
+  "dispensed_at",
+  "patient_received_at",
+  "patient_started_at",
+  "stop_reason",
+  "patient_question",
+] as const;
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function authorize(
   request: Request
-): { fail: NextResponse } | { db: ReturnType<typeof getDb>; profileId: number } {
+): { fail: NextResponse } | { db: ReturnType<typeof getDb>; profileId: number; userId: number } {
   const db = getDb();
   const user = getUserFromRequest(db, request);
   if (!user) return { fail: NextResponse.json({ error: "Not signed in." }, { status: 401 }) };
   const access = resolveProfileAccess(db, user, request, { write: true });
   if ("error" in access) return { fail: NextResponse.json({ error: access.error }, { status: access.status }) };
-  return { db, profileId: access.profileId };
+  return { db, profileId: access.profileId, userId: user.id };
 }
 
 export async function PATCH(request: Request, ctx: Ctx) {
@@ -47,7 +74,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
   const auth = authorize(request);
   if ("fail" in auth) return auth.fail;
-  const { db, profileId } = auth;
+  const { db, profileId, userId } = auth;
 
   let body: {
     status?: "active" | "stopped";
@@ -85,6 +112,15 @@ export async function PATCH(request: Request, ctx: Ctx) {
     .get(medId, profileId) as unknown as Medication | undefined;
   if (!current) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
+  // A plan the patient hasn't confirmed starting has no patient-reported
+  // usage to edit yet — the operative fields still mirror the prescription.
+  if (isPlanned(current)) {
+    return NextResponse.json(
+      { error: "Confirm this medication plan first — mark it received or started from your dashboard." },
+      { status: 409 }
+    );
+  }
+
   const sets: string[] = [];
   const args: (string | number | null)[] = [];
   let materialChange = false;
@@ -93,8 +129,25 @@ export async function PATCH(request: Request, ctx: Ctx) {
     if (body.status !== "active" && body.status !== "stopped") {
       return NextResponse.json({ error: "status must be 'active' or 'stopped'." }, { status: 400 });
     }
-    sets.push("status = ?", "end_date = ?");
-    args.push(body.status, body.status === "stopped" ? new Date().toISOString().slice(0, 10) : null);
+    // The legacy toggle only moves between taking and stopped. Declined /
+    // cancelled / replaced / completed records are history — silently
+    // reviving one here would bypass the guarded lifecycle state machine
+    // (and a replaced row still points at its replacement).
+    const lc = effectiveLifecycle(current);
+    if (["declined", "cancelled", "replaced", "completed"].includes(lc)) {
+      return NextResponse.json(
+        { error: `This medication is recorded as ${lc} — it can't be toggled active/stopped.` },
+        { status: 409 }
+      );
+    }
+    // The legacy toggle stays supported; the lifecycle column tracks it so
+    // both views of the row agree.
+    sets.push("status = ?", "end_date = ?", "lifecycle_status = ?");
+    args.push(
+      body.status,
+      body.status === "stopped" ? new Date().toISOString().slice(0, 10) : null,
+      body.status === "stopped" ? "stopped" : "currently_taking"
+    );
   }
   if (body.actual_use !== undefined) {
     const allowed = ["taking", "not_taking", "taking_differently", "recently_stopped", "unsure"];
@@ -184,6 +237,19 @@ export async function PATCH(request: Request, ctx: Ctx) {
   }
 
   db.prepare(`UPDATE medications SET ${sets.join(", ")} WHERE id = ? AND profile_id = ?`).run(...args, medId, profileId);
+
+  // The legacy toggle is still a lifecycle transition — it belongs on the
+  // same timeline as the guided actions.
+  if (body.status !== undefined && body.status !== current.status) {
+    logMedEvent(db, {
+      medicationId: medId,
+      profileId,
+      type: body.status === "stopped" ? "patient_stopped" : "patient_resumed",
+      actorUserId: userId,
+      actorRole: "patient",
+      meta: { via: "patch", from: effectiveLifecycle(current) },
+    });
+  }
 
   // Adherence must judge past dates by the schedule that was in effect then.
   if (scheduleChanged) {

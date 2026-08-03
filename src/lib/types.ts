@@ -74,6 +74,27 @@ export interface Medication {
   provenance: Provenance;
   last_material_change_at: string | null;
   replaced_by_id: number | null;
+  /** See src/lib/lifecycle.ts — null on pre-migration rows (helpers fall back to status). */
+  lifecycle_status: import("./lifecycle").LifecycleStatus | null;
+  source_type: import("./lifecycle").SourceType | null;
+  source_user_id: number | null;
+  /** Display name of who entered the record, joined at read time — distinct from prescriber_name. */
+  source_user_name?: string | null;
+  /** The immutable prescription record (clinician medication plans only). */
+  prescriber_name: string | null;
+  prescriber_profession: string | null;
+  prescriber_licence_number: string | null;
+  prescribed_at: string | null;
+  prescribed_dose_value: number | null;
+  prescribed_dose_unit: string | null;
+  prescribed_is_prn: number | null;
+  prescribed_schedule_times: string | null;
+  prescribed_instructions: string | null;
+  dispensed_at: string | null;
+  patient_received_at: string | null;
+  patient_started_at: string | null;
+  stop_reason: string | null;
+  patient_question: string | null;
   created_at: string;
   ingredients: ProductIngredient[];
 }
@@ -90,6 +111,14 @@ export interface DoseEvent {
 }
 
 export type AlertKind = "interaction" | "duplicate";
+
+/**
+ * Computed at read time from both medications' lifecycle states: 'current'
+ * only when both sides are confirmed current use. Never stored, so the same
+ * alert row (with its acknowledgment and review) flips to 'current' the
+ * moment the patient confirms starting.
+ */
+export type AlertConcernClass = "current" | "planned" | "paused";
 
 export type ExposureStatus = "overlap" | "no_overlap" | "insufficient_data" | "unknown";
 
@@ -113,6 +142,8 @@ export interface Alert {
   acknowledged_at: string | null;
   /** Computed at read time, not stored: is this alert about ingredients estimated active right now? */
   exposure_status?: ExposureStatus;
+  /** Computed at read time: 'planned' when either medication is an unstarted plan (or paused). */
+  concern_class?: AlertConcernClass;
   /** Active clinician review for this exact combination, attached at read time. */
   review?: AlertReview | null;
 }

@@ -18,6 +18,7 @@ import { recomputeAlerts } from "@/lib/conflicts";
 import { attachReviews } from "@/lib/reviews";
 import { computeAdherence } from "@/lib/adherence";
 import { loadShortageCache, lookupForMedication, normalizeDin } from "@/lib/shortages";
+import { effectiveLifecycle, inReconWorkspace, isCurrentlyTaken, isPlanned } from "@/lib/lifecycle";
 import { logAudit } from "@/lib/access";
 import { DISPOSITION_LABELS, type Disposition, type Medication } from "@/lib/types";
 
@@ -38,7 +39,15 @@ export interface DiscrepancyFlag {
     | "missed_doses"
     | "patient_note"
     | "supply_shortage"
-    | "supply_discontinued";
+    | "supply_discontinued"
+    | "not_received"
+    | "received_not_started"
+    | "declined_to_start"
+    | "plan_cancelled"
+    | "paused"
+    | "dose_differs_from_prescription"
+    | "schedule_differs_from_prescription"
+    | "prescriber_instructions_missing";
   label: string;
   detail: string | null;
 }
@@ -92,7 +101,98 @@ export function computeFlags(db: DatabaseSync, profileId: number): Map<number, D
   };
 
   for (const med of meds) {
-    if (med.status !== "active") continue;
+    // Reconciliation covers everything still in play: current, paused, and
+    // planned medications, plus declined/cancelled plans awaiting follow-up.
+    // Quietly ended meds (stopped/completed/replaced) are history. The same
+    // list drives the workspace query and the coverage snapshot.
+    const lifecycle = effectiveLifecycle(med);
+    if (!inReconWorkspace(med)) continue;
+
+    // Lifecycle discrepancies — the system states facts, never decides who
+    // is right.
+    if (lifecycle === "prescribed" || lifecycle === "sent_to_pharmacy" || lifecycle === "dispensed") {
+      add(med.id, {
+        code: "not_received",
+        label: "Prescribed — patient hasn't confirmed receiving it",
+        detail: med.prescribed_at ? `Prescribed ${med.prescribed_at}` : null,
+      });
+    }
+    if (lifecycle === "not_received") {
+      add(med.id, { code: "not_received", label: "Patient reports not receiving it", detail: med.stop_reason });
+    }
+    if (lifecycle === "received_not_started") {
+      add(med.id, {
+        code: "received_not_started",
+        label: "Received — not started",
+        detail: med.patient_received_at ? `Received ${med.patient_received_at.slice(0, 10)}` : null,
+      });
+    }
+    if (lifecycle === "declined") {
+      add(med.id, { code: "declined_to_start", label: "Patient declined to start", detail: med.stop_reason });
+    }
+    if (lifecycle === "cancelled") {
+      add(med.id, { code: "plan_cancelled", label: "Prescription cancelled or replaced", detail: med.stop_reason });
+    }
+    if (lifecycle === "temporarily_paused") {
+      add(med.id, { code: "paused", label: "Temporarily paused", detail: med.stop_reason });
+    }
+
+    // Prescribed vs patient-reported divergence — only meaningful once the
+    // patient actually started and both sides of the comparison exist.
+    if (isCurrentlyTaken(med) && med.prescribed_at) {
+      if (
+        med.prescribed_dose_value != null &&
+        (med.dose_value !== med.prescribed_dose_value || (med.dose_unit ?? "") !== (med.prescribed_dose_unit ?? ""))
+      ) {
+        add(med.id, {
+          code: "dose_differs_from_prescription",
+          label: "Patient reports a different dose than prescribed",
+          detail: `Prescribed ${med.prescribed_dose_value} ${med.prescribed_dose_unit ?? ""} · patient reports ${med.dose_value ?? "?"} ${med.dose_unit ?? ""}`,
+        });
+      }
+      const prescribedSchedule = med.prescribed_schedule_times ?? "[]";
+      const prescribedPrn = med.prescribed_is_prn ?? 0;
+      if (med.schedule_times !== prescribedSchedule || med.is_prn !== prescribedPrn) {
+        add(med.id, {
+          code: "schedule_differs_from_prescription",
+          label: "Patient reports a different schedule than prescribed",
+          detail: `Prescribed ${prescribedPrn ? "as needed" : JSON.parse(prescribedSchedule).join(", ") || "no times"} · patient reports ${med.is_prn ? "as needed" : JSON.parse(med.schedule_times).join(", ") || "no times"}`,
+        });
+      }
+    }
+    if (med.source_type === "clinician_medication_plan" && !med.prescribed_instructions) {
+      add(med.id, { code: "prescriber_instructions_missing", label: "Prescriber instructions missing", detail: null });
+    }
+
+    // Supply status — informational only, and it applies to PLANNED meds too
+    // (a shortage is worth knowing before the patient reaches the counter).
+    // It never touches alerts or severity, and the app never proposes a
+    // substitute; only reports we actually retrieved can produce a flag.
+    const supply = lookupForMedication(db, med, shortageCache);
+    if (supply.state === "checked") {
+      for (const report of supply.reports.filter((r) => r.state !== "resolved")) {
+        const detail = [
+          report.reason,
+          report.estimated_end_date ? `Estimated end ${report.estimated_end_date}` : null,
+          `Reported to Health Canada${report.source_updated_at ? ` · updated ${report.source_updated_at}` : ""}`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        if (report.kind === "discontinuation") {
+          add(med.id, { code: "supply_discontinued", label: "Discontinued by the manufacturer", detail });
+        } else {
+          const label =
+            report.state === "anticipated"
+              ? "Anticipated supply shortage"
+              : report.state === "unknown"
+                ? `Shortage report (status: ${report.status})`
+                : "Active supply shortage";
+          add(med.id, { code: "supply_shortage", label, detail });
+        }
+      }
+    }
+
+    if (isPlanned(med)) continue; // usage-based flags below apply to taken meds
 
     if (!med.verified) {
       add(med.id, {
@@ -131,48 +231,29 @@ export function computeFlags(db: DatabaseSync, profileId: number): Map<number, D
         detail: ad.adherence_pct !== null ? `Adherence ${ad.adherence_pct}%` : null,
       });
     }
-
-    // Supply status — informational only. It never touches alerts or
-    // severity, and the app never proposes a substitute; only reports we
-    // actually retrieved can produce a flag.
-    const supply = lookupForMedication(db, med, shortageCache);
-    if (supply.state === "checked") {
-      for (const report of supply.reports.filter((r) => r.state !== "resolved")) {
-        const detail = [
-          report.reason,
-          report.estimated_end_date ? `Estimated end ${report.estimated_end_date}` : null,
-          `Reported to Health Canada${report.source_updated_at ? ` · updated ${report.source_updated_at}` : ""}`,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        if (report.kind === "discontinuation") {
-          add(med.id, { code: "supply_discontinued", label: "Discontinued by the manufacturer", detail });
-        } else {
-          const label =
-            report.state === "anticipated"
-              ? "Anticipated supply shortage"
-              : report.state === "unknown"
-                ? `Shortage report (status: ${report.status})`
-                : "Active supply shortage";
-          add(med.id, { code: "supply_shortage", label, detail });
-        }
-      }
-    }
   }
 
   for (const a of alerts) {
     if (a.acknowledged_at || a.review) continue;
+    const cls = a.concern_class ?? "current";
+    const prefix = cls === "planned" ? "Planned " : cls === "paused" ? "Paused-med " : "";
+    const clsDetail =
+      cls === "planned"
+        ? " — involves a medication the patient hasn't confirmed starting"
+        : cls === "paused"
+          ? " — involves a temporarily paused medication"
+          : "";
     const flag: DiscrepancyFlag =
       a.kind === "duplicate"
         ? {
             code: "duplicate_ingredient",
-            label: `Duplicate ingredient: ${a.ingredient_a}`,
-            detail: `${a.med_a_name} + ${a.med_b_name}`,
+            label: `${prefix ? `${prefix}duplicate` : "Duplicate ingredient"}: ${a.ingredient_a}`,
+            detail: `${a.med_a_name} + ${a.med_b_name}${clsDetail}`,
           }
         : {
             code: "interaction_unreviewed",
-            label: `Open interaction: ${a.ingredient_a} + ${a.ingredient_b}`,
-            detail: `${a.severity} severity — not yet reviewed or acknowledged`,
+            label: `${prefix ? `${prefix}interaction` : "Open interaction"}: ${a.ingredient_a} + ${a.ingredient_b}`,
+            detail: `${a.severity} severity — ${cls === "current" ? "not yet reviewed or acknowledged" : clsDetail.slice(3)}`,
           };
     for (const medId of [a.med_a_id, a.med_b_id]) {
       // Duplicate flags list both product names already; avoid double-adding
@@ -276,11 +357,14 @@ export function completeSession(
   summaryNote: string | null,
   actorUserId: number
 ): SessionRow {
+  // Coverage snapshot counts the SAME set the workspace shows (current +
+  // paused + plans + follow-up-worthy terminals) — otherwise disposing a
+  // planned med yields "2 of 1 medications reviewed".
   const medsTotal = (
     db
-      .prepare("SELECT COUNT(*) AS n FROM medications WHERE profile_id = ? AND status = 'active'")
-      .get(session.profile_id) as { n: number }
-  ).n;
+      .prepare("SELECT id, status, lifecycle_status FROM medications WHERE profile_id = ?")
+      .all(session.profile_id) as unknown as Medication[]
+  ).filter((m) => inReconWorkspace(m)).length;
   db.prepare(
     `UPDATE reconciliation_sessions
      SET status = 'completed', completed_at = datetime('now'), summary_note = ?, meds_total = ?

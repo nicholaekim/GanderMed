@@ -9,6 +9,7 @@ import { titleCase } from "@/lib/normalize";
 import InvitationsPanel from "@/components/InvitationsPanel";
 import MetricsPanel from "@/components/MetricsPanel";
 import OrgPanel from "@/components/OrgPanel";
+import NotificationsPanel from "@/components/NotificationsPanel";
 
 const PURPOSES = ["Medication review", "MedsCheck preparation", "Post-discharge reconciliation", "Other"];
 
@@ -247,6 +248,8 @@ export default function ClinicPage() {
           </div>
         )}
       </section>
+
+      <NotificationsPanel />
 
       <OrgPanel me={me} />
 

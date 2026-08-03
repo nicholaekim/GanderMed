@@ -12,6 +12,8 @@ import ExposurePanel from "@/components/ExposurePanel";
 import TodaySchedule from "@/components/TodaySchedule";
 import MedicationList from "@/components/MedicationList";
 import HistoryList from "@/components/HistoryList";
+import MedPlanConfirm from "@/components/MedPlanConfirm";
+import NotificationsPanel from "@/components/NotificationsPanel";
 import { pctBadgeClass } from "@/components/AdherenceCard";
 import { RULESET_VERSION } from "@/data/interactionRules";
 import type { AdherenceReport } from "@/lib/adherence";
@@ -144,16 +146,16 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    if (res.ok) {
-      const { alerts: fresh } = await res.json();
-      setAlerts(fresh);
-      setMeds((prev) =>
-        prev.map((m) =>
-          m.id === id
-            ? { ...m, status, end_date: status === "stopped" ? new Date().toISOString().slice(0, 10) : null }
-            : m
-        )
-      );
+    const data = await res.json().catch(() => null);
+    if (res.ok && data) {
+      setAlerts(data.alerts);
+      // Use the server's row: it carries the synced lifecycle_status, which
+      // drives every card grouping (a local {status} merge would leave the
+      // med stuck in its old section).
+      setMeds((prev) => prev.map((m) => (m.id === id && data.medication ? data.medication : m)));
+      refreshEvents();
+    } else if (data?.error) {
+      window.alert(data.error);
     }
   }
 
@@ -233,10 +235,11 @@ export default function Dashboard() {
       ) : (
         <div className="mt-6 grid gap-6 lg:grid-cols-[400px_1fr]">
           <div className="space-y-6">
+            <MedPlanConfirm meds={meds} onChanged={loadAll} />
             <AddMedication onAdded={handleAdded} />
             <TodaySchedule meds={meds} events={events} onLog={logDose} />
+            <NotificationsPanel />
             <ExposurePanel exposure={exposure} />
-            {me?.share_code && <AccessPanel initialCode={me.share_code} />}
           </div>
           <div className="space-y-6">
             <AlertsPanel alerts={alerts} onAck={ack} />
@@ -268,6 +271,7 @@ export default function Dashboard() {
               </div>
             )}
             <HistoryList events={events} />
+            {me?.share_code && <AccessPanel initialCode={me.share_code} />}
           </div>
         </div>
       )}

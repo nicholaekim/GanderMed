@@ -11,6 +11,7 @@ import ExposurePanel from "@/components/ExposurePanel";
 import HistoryList from "@/components/HistoryList";
 import AdherenceCard from "@/components/AdherenceCard";
 import ReconcilePanel from "@/components/ReconcilePanel";
+import MedPlanForm from "@/components/MedPlanForm";
 import { titleCase } from "@/lib/normalize";
 import type { AdherenceReport } from "@/lib/adherence";
 import type { ShortageLookup } from "@/lib/shortages";
@@ -136,6 +137,11 @@ export default function ClinicPatientPage({ params }: { params: Promise<{ id: st
           <HistoryList events={events} />
         </div>
         <div className="space-y-6">
+          <MedPlanForm
+            patientId={Number(id)}
+            meds={meds}
+            onCreated={() => window.location.reload()}
+          />
           <ReconcilePanel patientId={Number(id)} meds={meds} />
           <AlertsPanel
             alerts={alerts}

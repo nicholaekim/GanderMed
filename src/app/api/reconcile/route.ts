@@ -15,6 +15,7 @@ import {
   sessionItems,
   startSession,
 } from "@/lib/reconcile";
+import { RECON_WORKSPACE_STATUSES } from "@/lib/lifecycle";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -28,9 +29,19 @@ export async function GET(request: Request) {
   const session = user.role === "clinician" ? getOpenSession(db, profileId, user.id) : null;
   const items = session ? sessionItems(db, session.id) : new Map();
 
+  // The workspace covers everything still in play — the shared
+  // RECON_WORKSPACE_STATUSES list (also used by computeFlags and the
+  // coverage snapshot, so they can never disagree). `status = 'active'`
+  // keeps NULL-lifecycle legacy rows in via the mirror fallback.
+  const placeholders = RECON_WORKSPACE_STATUSES.map(() => "?").join(",");
   const meds = db
-    .prepare("SELECT id FROM medications WHERE profile_id = ? AND status = 'active' ORDER BY brand_name")
-    .all(profileId) as { id: number }[];
+    .prepare(
+      `SELECT id FROM medications
+       WHERE profile_id = ?
+         AND (status = 'active' OR lifecycle_status IN (${placeholders}))
+       ORDER BY brand_name`
+    )
+    .all(profileId, ...RECON_WORKSPACE_STATUSES) as { id: number }[];
 
   // Dispositions from the most recent completed reconciliation are part of
   // the record (they appear on the printable report); patients see their own.

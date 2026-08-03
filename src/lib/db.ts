@@ -43,6 +43,35 @@ CREATE TABLE IF NOT EXISTS medications (
     ('patient-reported','imported','pharmacy-confirmed','prescriber-listed','discharge-list','unknown')),
   last_material_change_at TEXT,
   replaced_by_id INTEGER REFERENCES medications(id),
+  -- Lifecycle (see src/lib/lifecycle.ts). Old DBs get these via nullable
+  -- ALTERs + an idempotent backfill; helpers tolerate NULL via the legacy
+  -- status fallback.
+  lifecycle_status TEXT CHECK (lifecycle_status IN
+    ('prescribed','sent_to_pharmacy','dispensed','received_not_started','currently_taking',
+     'taking_differently','temporarily_paused','not_received','declined','cancelled','replaced','stopped','completed')),
+  source_type TEXT CHECK (source_type IN
+    ('patient_reported','clinician_medication_plan','pharmacy_dispensing_record','prescriber_record',
+     'hospital_discharge_record','imported_record','manual_unverified')),
+  source_user_id INTEGER REFERENCES users(id),
+  -- The immutable prescription record (clinician plans only). The operative
+  -- dose/schedule/instructions columns above remain the PATIENT-REPORTED
+  -- actual use; these are never overwritten by patient edits and vice versa.
+  prescriber_name TEXT,
+  prescriber_profession TEXT,
+  prescriber_licence_number TEXT,
+  prescribed_at TEXT,
+  prescribed_dose_value REAL,
+  prescribed_dose_unit TEXT,
+  prescribed_is_prn INTEGER,
+  prescribed_schedule_times TEXT,
+  prescribed_instructions TEXT,
+  -- Receipt / start / stop truth, patient-confirmed (dispensed_at reserved
+  -- for a verified pharmacy workflow — nothing writes it in this version).
+  dispensed_at TEXT,
+  patient_received_at TEXT,
+  patient_started_at TEXT,
+  stop_reason TEXT,
+  patient_question TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -109,6 +138,40 @@ CREATE TABLE IF NOT EXISTS care_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (clinician_user_id, profile_id)
 );
+
+-- Append-only lifecycle event log: who did what to a medication and when.
+-- Meta is ids/enums/dates only — never free text beyond what the event
+-- itself is (e.g. a stop reason), never secrets.
+CREATE TABLE IF NOT EXISTS medication_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  actor_user_id INTEGER REFERENCES users(id),
+  actor_role TEXT,
+  at TEXT NOT NULL DEFAULT (datetime('now')),
+  meta TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_med_events_med ON medication_events(medication_id, at);
+CREATE INDEX IF NOT EXISTS idx_med_events_profile ON medication_events(profile_id, at);
+
+-- In-app notifications (structured so email/push delivery can bolt on
+-- later). The dedupe key stops lazy generators from re-inserting the same
+-- nudge every read.
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  profile_id INTEGER,
+  medication_id INTEGER,
+  type TEXT NOT NULL,
+  body TEXT NOT NULL,
+  dedupe_key TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_notifications_dedupe
+  ON notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
 
 -- Cached Health Canada shortage/discontinuation reports, keyed by DIN so
 -- they join straight onto verified medications. Cache only: a missing row
@@ -463,6 +526,56 @@ function migrateColumns(db: DatabaseSync) {
   } catch {
     // column already exists
   }
+  // Medication lifecycle (all nullable so old rows survive; helpers fall
+  // back to the legacy status column when lifecycle_status is NULL).
+  const lifecycleColumns = [
+    `lifecycle_status TEXT CHECK (lifecycle_status IN
+      ('prescribed','sent_to_pharmacy','dispensed','received_not_started','currently_taking',
+       'taking_differently','temporarily_paused','not_received','declined','cancelled','replaced','stopped','completed'))`,
+    `source_type TEXT CHECK (source_type IN
+      ('patient_reported','clinician_medication_plan','pharmacy_dispensing_record','prescriber_record',
+       'hospital_discharge_record','imported_record','manual_unverified'))`,
+    "source_user_id INTEGER REFERENCES users(id)",
+    "prescriber_name TEXT",
+    "prescriber_profession TEXT",
+    "prescriber_licence_number TEXT",
+    "prescribed_at TEXT",
+    "prescribed_dose_value REAL",
+    "prescribed_dose_unit TEXT",
+    "prescribed_is_prn INTEGER",
+    "prescribed_schedule_times TEXT",
+    "prescribed_instructions TEXT",
+    "dispensed_at TEXT",
+    "patient_received_at TEXT",
+    "patient_started_at TEXT",
+    "stop_reason TEXT",
+    "patient_question TEXT",
+  ];
+  for (const col of lifecycleColumns) {
+    try {
+      db.exec(`ALTER TABLE medications ADD COLUMN ${col}`);
+    } catch {
+      // column already exists
+    }
+  }
+  // Idempotent backfill (WHERE ... IS NULL is a no-op after the first run):
+  // active rows were, by definition, what the patient reported taking;
+  // stopped rows keep their ending, with replacement links preserved.
+  db.exec(
+    `UPDATE medications SET lifecycle_status =
+       CASE
+         WHEN status = 'active' AND actual_use = 'taking_differently' THEN 'taking_differently'
+         WHEN status = 'active' THEN 'currently_taking'
+         WHEN replaced_by_id IS NOT NULL THEN 'replaced'
+         ELSE 'stopped'
+       END
+     WHERE lifecycle_status IS NULL`
+  );
+  db.exec(
+    `UPDATE medications SET source_type = CASE WHEN verified = 0 THEN 'manual_unverified' ELSE 'patient_reported' END
+     WHERE source_type IS NULL`
+  );
+
   // Phase 5 org scoping — defensive ALTERs for any vintage of DB file.
   try {
     db.exec("ALTER TABLE access_grants ADD COLUMN organization_id INTEGER");

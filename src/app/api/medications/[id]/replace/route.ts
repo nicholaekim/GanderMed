@@ -14,6 +14,8 @@ import { attachReviews } from "@/lib/reviews";
 import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
 import { canonicalIngredient, detectExtendedRelease } from "@/lib/normalize";
 import { recordInitialSchedule } from "@/lib/adherence";
+import { isPlanned } from "@/lib/lifecycle";
+import { logMedEvent } from "@/lib/medevents";
 import type { Medication } from "@/lib/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -47,6 +49,15 @@ export async function POST(request: Request, ctx: Ctx) {
   if (old.replaced_by_id != null) {
     return NextResponse.json({ error: "This medication was already replaced." }, { status: 409 });
   }
+  if (isPlanned(old)) {
+    // An unstarted plan has nothing to hand over (no usage to inherit, no
+    // history to retain). The plan's own confirmation actions cover this:
+    // "cancelled or replaced" if the prescriber swapped it.
+    return NextResponse.json(
+      { error: "This is an unconfirmed medication plan — confirm it first, or mark it cancelled/replaced from the plan card." },
+      { status: 409 }
+    );
+  }
 
   let verified;
   try {
@@ -74,8 +85,8 @@ export async function POST(request: Request, ctx: Ctx) {
       .prepare(
         `INSERT INTO medications
          (profile_id, drug_code, din, brand_name, company_name, route, dosage_form, verified, is_extended_release,
-          dose_value, dose_unit, is_prn, schedule_times, start_date, instructions, actual_use, patient_notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          dose_value, dose_unit, is_prn, schedule_times, start_date, instructions, actual_use, patient_notes, lifecycle_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         profileId,
@@ -93,7 +104,8 @@ export async function POST(request: Request, ctx: Ctx) {
         today,
         old.instructions,
         old.actual_use,
-        old.patient_notes
+        old.patient_notes,
+        old.actual_use === "taking_differently" ? "taking_differently" : "currently_taking"
       );
     newId = Number(info.lastInsertRowid);
     recordInitialSchedule(db, newId, old.is_prn, old.schedule_times);
@@ -107,18 +119,27 @@ export async function POST(request: Request, ctx: Ctx) {
     }
 
     // Stop-and-retain: dose history stays on the old row; the link records
-    // what superseded it.
-    db.prepare("UPDATE medications SET status = 'stopped', end_date = ?, replaced_by_id = ? WHERE id = ?").run(
-      today,
-      newId,
-      medId
-    );
+    // what superseded it. BOTH status columns move — 'replaced' lifecycle
+    // with its 'stopped' legacy mirror — or the old row would keep phantom
+    // Today slots and current-use alerts.
+    db.prepare(
+      "UPDATE medications SET status = 'stopped', lifecycle_status = 'replaced', end_date = ?, replaced_by_id = ? WHERE id = ?"
+    ).run(today, newId, medId);
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
     console.error("Replace medication failed:", e);
     return NextResponse.json({ error: "Could not replace the medication." }, { status: 500 });
   }
+
+  logMedEvent(db, {
+    medicationId: medId,
+    profileId,
+    type: "medication_replaced",
+    actorUserId: user.id,
+    actorRole: user.role === "clinician" ? "clinician" : "patient",
+    meta: { replaced_by: newId, new_drug_code: verified.drug_code },
+  });
 
   const { created, all } = recomputeAlerts(db, profileId);
   const exposure = computeExposure(db, profileId);

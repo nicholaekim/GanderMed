@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getUserFromRequest, resolveProfileAccess } from "@/lib/auth";
+import { effectiveLifecycle, isCurrentlyTaken, isPlanned } from "@/lib/lifecycle";
+import type { Medication } from "@/lib/types";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -58,8 +60,32 @@ export async function POST(request: Request) {
 
   const med = db
     .prepare("SELECT * FROM medications WHERE id = ? AND profile_id = ?")
-    .get(medId, access.profileId) as { dose_value: number | null; dose_unit: string | null } | undefined;
+    .get(medId, access.profileId) as unknown as
+    | Pick<Medication, "dose_value" | "dose_unit" | "status" | "lifecycle_status">
+    | undefined;
   if (!med) return NextResponse.json({ error: "Medication not found." }, { status: 404 });
+  // A dose log on a med the record says isn't being taken would silently
+  // count as exposure while the record says otherwise — the two truths must
+  // not diverge. Planned: confirm the start first. Paused: resume first.
+  // Terminal: the record is closed.
+  if (isPlanned(med)) {
+    return NextResponse.json(
+      { error: "Confirm you've started this medication first — then doses can be logged." },
+      { status: 409 }
+    );
+  }
+  if (!isCurrentlyTaken(med)) {
+    const lc = effectiveLifecycle(med);
+    return NextResponse.json(
+      {
+        error:
+          lc === "temporarily_paused"
+            ? "This medication is paused — resume it first, then log the dose."
+            : `This medication is recorded as ${lc} — doses can't be logged on a closed record.`,
+      },
+      { status: 409 }
+    );
+  }
 
   const backdate = body.logged_at ? new Date(body.logged_at) : null;
   const now = backdate && !isNaN(backdate.getTime()) ? backdate : new Date();

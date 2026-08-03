@@ -204,10 +204,28 @@ function upsert(db: DatabaseSync, row: ShortageRow): void {
   );
 }
 
-/** Every distinct DIN on an active, DPD-verified medication. */
+/**
+ * SQL predicate for supply-checking scope (the SQL twin of lifecycle.ts
+ * inSupplyChecking): verified-medication rows that are taken, planned, or
+ * paused. Terminal lifecycles read as legacy status 'stopped'; planned rows
+ * carry a lifecycle value, so the OR covers both vintages of data. Used by
+ * the sync candidate list AND every read surface — a planned med the sync
+ * checks must also be able to SHOW its result.
+ */
+export const SUPPLY_SCOPE_SQL = `(status = 'active' OR lifecycle_status IN
+  ('prescribed','sent_to_pharmacy','dispensed','received_not_started','not_received','temporarily_paused'))`;
+
+/**
+ * Every distinct DIN worth checking. A newly prescribed product that is
+ * short is exactly the case worth catching before the patient reaches the
+ * counter.
+ */
 export function dinsInUse(db: DatabaseSync): string[] {
   const rows = db
-    .prepare("SELECT DISTINCT din FROM medications WHERE verified = 1 AND status = 'active' AND din IS NOT NULL")
+    .prepare(
+      `SELECT DISTINCT din FROM medications
+       WHERE verified = 1 AND din IS NOT NULL AND ${SUPPLY_SCOPE_SQL}`
+    )
     .all() as { din: string }[];
   return [...new Set(rows.map((r) => normalizeDin(r.din)).filter((d): d is string => !!d))];
 }
@@ -351,10 +369,10 @@ export function loadShortageCache(
   return { checks, reports: reportsForDins(db, dins) };
 }
 
-/** Active verified medications of a profile that carry an open shortage report. */
+/** Supply-scoped (taken/planned/paused) verified medications of a profile that carry an open shortage report. */
 export function countOpenShortages(db: DatabaseSync, profileId: number): number {
   const meds = db
-    .prepare("SELECT din FROM medications WHERE profile_id = ? AND status = 'active' AND verified = 1 AND din IS NOT NULL")
+    .prepare(`SELECT din FROM medications WHERE profile_id = ? AND verified = 1 AND din IS NOT NULL AND ${SUPPLY_SCOPE_SQL}`)
     .all(profileId) as { din: string }[];
   const stmt = db.prepare("SELECT COUNT(*) AS n FROM drug_shortages WHERE din = ? AND state != 'resolved'");
   let affected = 0;

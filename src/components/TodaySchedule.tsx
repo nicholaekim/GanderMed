@@ -1,6 +1,7 @@
 "use client";
 
 import type { DoseEvent, Medication } from "@/lib/types";
+import { inDoseSchedule } from "@/lib/lifecycle";
 import { titleCase } from "@/lib/normalize";
 import { todayStr } from "@/lib/format";
 
@@ -14,7 +15,9 @@ export default function TodaySchedule({
   onLog: (medicationId: number, scheduledAt: string | null, action: "taken" | "skipped") => void;
 }) {
   const today = todayStr();
-  const active = meds.filter((m) => m.status === "active");
+  // Only medications the patient reports actually taking belong on today's
+  // schedule — planned and paused ones have no doses due.
+  const active = meds.filter((m) => inDoseSchedule(m));
   const now = new Date();
 
   const eventBySlot = new Map<string, DoseEvent>();

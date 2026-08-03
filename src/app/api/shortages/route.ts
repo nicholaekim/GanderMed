@@ -16,6 +16,7 @@ import {
   normalizeDin,
   shortagesConfigured,
   syncShortages,
+  SUPPLY_SCOPE_SQL,
 } from "@/lib/shortages";
 
 export async function GET(request: Request) {
@@ -25,8 +26,10 @@ export async function GET(request: Request) {
   const access = resolveProfileAccess(db, user, request, { write: false });
   if ("error" in access) return NextResponse.json({ error: access.error }, { status: access.status });
 
+  // Same scope as the sync candidate list: taken + planned + paused meds —
+  // a planned med the sync checked must be able to show its result here.
   const meds = db
-    .prepare("SELECT id, brand_name, din, verified FROM medications WHERE profile_id = ? AND status = 'active'")
+    .prepare(`SELECT id, brand_name, din, verified FROM medications WHERE profile_id = ? AND ${SUPPLY_SCOPE_SQL}`)
     .all(access.profileId) as { id: number; brand_name: string; din: string | null; verified: number }[];
 
   const dins = meds.map((m) => normalizeDin(m.din)).filter((d): d is string => !!d);

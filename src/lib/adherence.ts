@@ -23,6 +23,7 @@
 // the wall clock, never the number of slots on a date.
 
 import type { DatabaseSync } from "node:sqlite";
+import { inAdherence, type LifecycleStatus } from "@/lib/lifecycle";
 
 export type SlotOutcome = "on_time" | "late" | "skipped" | "missed" | "future";
 
@@ -109,6 +110,7 @@ interface MedRow {
   id: number;
   brand_name: string;
   status: "active" | "stopped";
+  lifecycle_status: LifecycleStatus | null;
   is_prn: number;
   schedule_times: string;
   start_date: string | null;
@@ -140,12 +142,17 @@ function pct(counts: Record<SlotOutcome, number>): { due: number; pct: number | 
 }
 
 export function computeAdherence(db: DatabaseSync, profileId: number, days: number, now: Date = new Date()): AdherenceReport {
-  const meds = db
-    .prepare(
-      `SELECT id, brand_name, status, is_prn, schedule_times, start_date, end_date, created_at
-       FROM medications WHERE profile_id = ?`
-    )
-    .all(profileId) as unknown as MedRow[];
+  // Planned medications generate NO expected slots (nothing is due before
+  // the patient confirms starting); paused ones have their expectations
+  // suspended. Terminal meds keep their history via the date clamps below.
+  const meds = (
+    db
+      .prepare(
+        `SELECT id, brand_name, status, lifecycle_status, is_prn, schedule_times, start_date, end_date, created_at
+         FROM medications WHERE profile_id = ?`
+      )
+      .all(profileId) as unknown as MedRow[]
+  ).filter((m) => inAdherence(m));
 
   const historyStmt = db.prepare(
     "SELECT is_prn, schedule_times, effective_from, effective_to FROM medication_schedule_history WHERE medication_id = ? ORDER BY effective_from"

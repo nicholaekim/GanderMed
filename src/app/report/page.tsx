@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ACTUAL_USE_LABELS, DISPOSITION_LABELS, PROVENANCE_LABELS, type AccessGrantView, type Alert, type Disposition, type DoseEvent, type ExposureReport, type Medication, type Severity } from "@/lib/types";
 import type { AdherenceReport } from "@/lib/adherence";
 import type { ShortageLookup } from "@/lib/shortages";
+import { LIFECYCLE_LABELS, effectiveLifecycle, isCurrentlyTaken, isPaused, isPlanned } from "@/lib/lifecycle";
 import { EXPOSURE_VERSION } from "@/data/ingredientProfiles";
 import { EVIDENCE_LABEL, SEVERITY_META, fmtDate, fmtTime, scheduleLabel } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
@@ -126,8 +127,12 @@ function ReportInner() {
     })();
   }, [patientParam, router]);
 
-  const active = meds.filter((m) => m.status === "active");
-  const stopped = meds.filter((m) => m.status === "stopped");
+  const active = meds.filter((m) => isCurrentlyTaken(m) || isPaused(m));
+  const planned = meds.filter((m) => isPlanned(m));
+  const stopped = meds.filter((m) => !isCurrentlyTaken(m) && !isPaused(m) && !isPlanned(m));
+  const plannedAlerts = alerts.filter((a) => a.concern_class === "planned");
+  const pausedAlerts = alerts.filter((a) => a.concern_class === "paused");
+  const currentAlerts = alerts.filter((a) => a.concern_class !== "planned" && a.concern_class !== "paused");
 
   return (
     <div className="mx-auto max-w-3xl bg-white px-4 py-8 text-slate-900 sm:px-8 print:px-0">
@@ -194,7 +199,31 @@ function ReportInner() {
                       <span className="text-slate-500">
                         {m.verified ? `DIN ${m.din}` : "Unverified entry — not safety-checked"}
                         {m.provenance ? ` · ${PROVENANCE_LABELS[m.provenance]}` : ""}
+                        {effectiveLifecycle(m) !== "currently_taking" ? ` · ${LIFECYCLE_LABELS[effectiveLifecycle(m)]}` : ""}
                       </span>
+                      {m.prescribed_at && (
+                        <>
+                          <br />
+                          <span className="text-slate-600">
+                            Prescribed {fmtDate(m.prescribed_at)}
+                            {m.prescriber_name ? ` by ${m.prescriber_name}` : ""}:{" "}
+                            {m.prescribed_dose_value != null ? `${m.prescribed_dose_value} ${m.prescribed_dose_unit ?? ""}, ` : ""}
+                            {m.prescribed_is_prn
+                              ? "as needed"
+                              : (JSON.parse(m.prescribed_schedule_times ?? "[]") as string[]).join(", ") || "no set times"}
+                            {(m.dose_value !== m.prescribed_dose_value ||
+                              m.schedule_times !== (m.prescribed_schedule_times ?? "[]")) &&
+                            isCurrentlyTaken(m) ? (
+                              <span className="font-semibold text-amber-800"> — differs from patient-reported use</span>
+                            ) : null}
+                          </span>
+                          <br />
+                          <span className="text-slate-500">
+                            {m.patient_received_at ? `Received ${fmtDate(m.patient_received_at)}` : "Receipt not confirmed"}
+                            {m.patient_started_at ? ` · started ${fmtDate(m.patient_started_at)}` : " · start not confirmed"}
+                          </span>
+                        </>
+                      )}
                       {m.actual_use && m.actual_use !== "taking" && (
                         <>
                           <br />
@@ -261,13 +290,83 @@ function ReportInner() {
           {stopped.length > 0 && (
             <>
               <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
-                Recently stopped
+                Recently stopped, completed, cancelled, or declined
               </h2>
               <ul className="mt-2 space-y-1 text-xs">
                 {stopped.map((m) => (
                   <li key={m.id}>
                     <span className="font-semibold">{titleCase(m.brand_name)}</span>
-                    {m.din ? ` (DIN ${m.din})` : ""} — stopped {fmtDate(m.end_date)}
+                    {m.din ? ` (DIN ${m.din})` : ""} — {LIFECYCLE_LABELS[effectiveLifecycle(m)].toLowerCase()}
+                    {m.end_date ? ` ${fmtDate(m.end_date)}` : ""}
+                    {m.stop_reason ? ` · ${m.stop_reason}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {planned.length > 0 && (
+            <>
+              <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
+                Planned medications — not yet started ({planned.length})
+              </h2>
+              <ul className="mt-2 space-y-1 text-xs">
+                {planned.map((m) => (
+                  <li key={m.id}>
+                    <span className="font-semibold">{titleCase(m.brand_name)}</span>
+                    {m.din ? ` (DIN ${m.din})` : ""} — {LIFECYCLE_LABELS[effectiveLifecycle(m)]}
+                    {m.prescribed_at ? ` · prescribed ${fmtDate(m.prescribed_at)}` : ""}
+                    {m.prescriber_name ? ` by ${m.prescriber_name}` : ""}
+                    {m.prescribed_dose_value != null || m.prescribed_schedule_times
+                      ? ` · ${m.prescribed_dose_value != null ? `${m.prescribed_dose_value} ${m.prescribed_dose_unit ?? ""} ` : ""}${
+                          m.prescribed_is_prn
+                            ? "as needed"
+                            : (JSON.parse(m.prescribed_schedule_times ?? "[]") as string[]).join(", ") || ""
+                        }`
+                      : ""}
+                    {m.patient_question ? (
+                      <span className="block italic text-violet-800">Patient question: “{m.patient_question}”</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {plannedAlerts.length > 0 && (
+            <>
+              <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
+                Planned-medication concerns ({plannedAlerts.length})
+              </h2>
+              <p className="mt-1 text-[11px] text-slate-500">
+                These involve a medication the patient has not confirmed starting — they are checked in
+                advance and are not recorded active exposure.
+              </p>
+              <ul className="mt-2 space-y-1 text-xs">
+                {plannedAlerts.map((a) => (
+                  <li key={a.id}>
+                    <span className="font-bold uppercase">{a.severity}</span> — {titleCase(a.med_a_name)} +{" "}
+                    {titleCase(a.med_b_name)} ({a.kind === "duplicate" ? `duplicate ${a.ingredient_a}` : `${a.ingredient_a} × ${a.ingredient_b}`})
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {pausedAlerts.length > 0 && (
+            <>
+              <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
+                Paused-medication concerns ({pausedAlerts.length})
+              </h2>
+              <p className="mt-1 text-[11px] text-slate-500">
+                These involve a medication the patient reports temporarily paused — not current co-use,
+                but relevant again the moment it resumes.
+              </p>
+              <ul className="mt-2 space-y-1 text-xs">
+                {pausedAlerts.map((a) => (
+                  <li key={a.id}>
+                    <span className="font-bold uppercase">{a.severity}</span> — {titleCase(a.med_a_name)} +{" "}
+                    {titleCase(a.med_b_name)} ({a.kind === "duplicate" ? `duplicate ${a.ingredient_a}` : `${a.ingredient_a} × ${a.ingredient_b}`})
                   </li>
                 ))}
               </ul>
@@ -275,15 +374,15 @@ function ReportInner() {
           )}
 
           <h2 className="mt-6 border-b border-slate-300 pb-1 text-sm font-bold uppercase tracking-wide">
-            Safety alerts ({alerts.length})
+            Current-use safety alerts ({currentAlerts.length})
           </h2>
-          {alerts.length === 0 ? (
+          {currentAlerts.length === 0 ? (
             <p className="mt-2 text-sm text-slate-500">
               No conflicts detected among checked medications (demonstration ruleset).
             </p>
           ) : (
             <div className="mt-2 space-y-3">
-              {alerts.map((a) => {
+              {currentAlerts.map((a) => {
                 const meta = SEVERITY_META[a.severity as Severity] ?? SEVERITY_META.minor;
                 return (
                   <div key={a.id} className="rounded-lg border border-slate-200 p-3 text-xs">
