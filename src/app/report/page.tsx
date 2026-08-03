@@ -130,7 +130,7 @@ function ReportInner() {
   const stopped = meds.filter((m) => m.status === "stopped");
 
   return (
-    <div className="mx-auto max-w-3xl bg-white px-8 py-8 text-slate-900 print:px-0">
+    <div className="mx-auto max-w-3xl bg-white px-4 py-8 text-slate-900 sm:px-8 print:px-0">
       <div className="mb-6 flex items-center justify-between print:hidden">
         <Link
           href={patientParam ? `/clinic/patient/${patientParam}` : "/"}
@@ -173,7 +173,9 @@ function ReportInner() {
           {active.length === 0 ? (
             <p className="mt-2 text-sm text-slate-500">None recorded.</p>
           ) : (
-            <table className="mt-2 w-full border-collapse text-xs">
+            // Wide tables scroll inside themselves so the page never does.
+            <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[34rem] border-collapse text-xs sm:min-w-0">
               <thead>
                 <tr className="text-left text-slate-500">
                   <th className="border-b border-slate-200 py-1 pr-2 font-semibold">Product</th>
@@ -253,6 +255,7 @@ function ReportInner() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           {stopped.length > 0 && (
@@ -390,7 +393,8 @@ function ReportInner() {
             </p>
           ) : (
             <>
-              <table className="mt-2 w-full border-collapse text-xs">
+              <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[34rem] border-collapse text-xs sm:min-w-0">
                 <thead>
                   <tr className="text-left text-slate-500">
                     <th className="border-b border-slate-200 py-1 pr-2 font-semibold">Medication</th>
@@ -433,6 +437,7 @@ function ReportInner() {
                   ))}
                 </tbody>
               </table>
+              </div>
               <p className="mt-1.5 text-[10px] text-slate-400">
                 Overall: {adherence.overall.adherence_pct === null ? "no data" : `${adherence.overall.adherence_pct}%`} ·
                 Formula: {adherence.formula} &ldquo;Missed&rdquo; = nothing logged and more than an hour past the

@@ -44,7 +44,10 @@ export default function TodaySchedule({
               {times.length === 0 ? (
                 <p className="text-xs text-slate-400">No schedule set.</p>
               ) : (
-                <div className="mt-1 flex flex-wrap gap-1.5">
+                // One row per dose slot. Take/Skip are the controls this app
+                // is tapped for every day, often by older users on a phone,
+                // so they stay at a 44px touch target.
+                <div className="mt-1.5 space-y-1.5">
                   {times.map((t) => {
                     const slot = `${today}T${t}`;
                     const ev = eventBySlot.get(`${m.id}|${slot}`);
@@ -52,46 +55,48 @@ export default function TodaySchedule({
                     if (ev) {
                       const style =
                         ev.status === "taken"
-                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                           : ev.status === "late"
-                            ? "border-amber-300 bg-amber-50 text-amber-700"
-                            : "border-slate-200 bg-slate-50 text-slate-400 line-through";
+                            ? "border-amber-200 bg-amber-50 text-amber-700"
+                            : "border-slate-200 bg-slate-50 text-slate-400";
                       const label =
-                        ev.status === "taken" ? "✓" : ev.status === "late" ? "✓ late" : "skipped";
+                        ev.status === "taken" ? "Taken ✓" : ev.status === "late" ? "Taken late ✓" : "Skipped";
                       return (
-                        <span
+                        <div
                           key={t}
-                          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${style}`}
-                          title={`Logged ${ev.status}`}
+                          className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${style}`}
                         >
-                          {t} {label}
-                        </span>
+                          <span className={ev.status === "skipped" ? "line-through" : ""}>{t}</span>
+                          <span className="text-xs font-medium">{label}</span>
+                        </div>
                       );
                     }
                     return (
-                      <span
+                      <div
                         key={t}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${
-                          isPast
-                            ? "border-amber-300 bg-amber-50 text-amber-800"
-                            : "border-slate-200 bg-white text-slate-600"
+                        className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 ${
+                          isPast ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"
                         }`}
                       >
-                        {t}
-                        {isPast && <span className="font-semibold">due</span>}
-                        <button
-                          onClick={() => onLog(m.id, slot, "taken")}
-                          className="ml-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-emerald-700"
-                        >
-                          Take
-                        </button>
-                        <button
-                          onClick={() => onLog(m.id, slot, "skipped")}
-                          className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-300"
-                        >
-                          Skip
-                        </button>
-                      </span>
+                        <span className="text-sm text-slate-700">
+                          {t}
+                          {isPast && <span className="ml-1.5 text-xs font-semibold text-amber-800">due</span>}
+                        </span>
+                        <span className="flex gap-1.5">
+                          <button
+                            onClick={() => onLog(m.id, slot, "taken")}
+                            className="min-h-11 rounded-lg bg-emerald-600 px-4 text-xs font-semibold text-white hover:bg-emerald-700"
+                          >
+                            Take
+                          </button>
+                          <button
+                            onClick={() => onLog(m.id, slot, "skipped")}
+                            className="min-h-11 rounded-lg bg-slate-100 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-200"
+                          >
+                            Skip
+                          </button>
+                        </span>
+                      </div>
                     );
                   })}
                 </div>
@@ -105,11 +110,11 @@ export default function TodaySchedule({
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">As needed</p>
             <div className="mt-1.5 space-y-1.5">
               {prn.map((m) => (
-                <div key={m.id} className="flex items-center justify-between">
+                <div key={m.id} className="flex items-center justify-between gap-2">
                   <span className="text-sm">{titleCase(m.brand_name)}</span>
                   <button
                     onClick={() => onLog(m.id, null, "taken")}
-                    className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+                    className="min-h-11 shrink-0 rounded-lg bg-emerald-600 px-4 text-xs font-semibold text-white hover:bg-emerald-700"
                   >
                     Log dose now
                   </button>
