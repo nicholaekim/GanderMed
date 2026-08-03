@@ -17,6 +17,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { recomputeAlerts } from "@/lib/conflicts";
 import { attachReviews } from "@/lib/reviews";
 import { computeAdherence } from "@/lib/adherence";
+import { loadShortageCache, lookupForMedication, normalizeDin } from "@/lib/shortages";
 import { logAudit } from "@/lib/access";
 import { DISPOSITION_LABELS, type Disposition, type Medication } from "@/lib/types";
 
@@ -35,7 +36,9 @@ export interface DiscrepancyFlag {
     | "duplicate_ingredient"
     | "interaction_unreviewed"
     | "missed_doses"
-    | "patient_note";
+    | "patient_note"
+    | "supply_shortage"
+    | "supply_discontinued";
   label: string;
   detail: string | null;
 }
@@ -77,6 +80,10 @@ export function computeFlags(db: DatabaseSync, profileId: number): Map<number, D
   attachReviews(db, profileId, alerts);
   const adherence = computeAdherence(db, profileId, 14);
   const adherenceByMed = new Map(adherence.per_med.map((m) => [m.medication_id, m]));
+  const shortageCache = loadShortageCache(
+    db,
+    meds.map((m) => normalizeDin(m.din)).filter((d): d is string => !!d)
+  );
 
   const flags = new Map<number, DiscrepancyFlag[]>();
   const add = (medId: number, flag: DiscrepancyFlag) => {
@@ -123,6 +130,33 @@ export function computeFlags(db: DatabaseSync, profileId: number): Map<number, D
         label: `${ad.counts.missed} missed dose${ad.counts.missed === 1 ? "" : "s"} (14 days)`,
         detail: ad.adherence_pct !== null ? `Adherence ${ad.adherence_pct}%` : null,
       });
+    }
+
+    // Supply status — informational only. It never touches alerts or
+    // severity, and the app never proposes a substitute; only reports we
+    // actually retrieved can produce a flag.
+    const supply = lookupForMedication(db, med, shortageCache);
+    if (supply.state === "checked") {
+      for (const report of supply.reports.filter((r) => r.state !== "resolved")) {
+        const detail = [
+          report.reason,
+          report.estimated_end_date ? `Estimated end ${report.estimated_end_date}` : null,
+          `Reported to Health Canada${report.source_updated_at ? ` · updated ${report.source_updated_at}` : ""}`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        if (report.kind === "discontinuation") {
+          add(med.id, { code: "supply_discontinued", label: "Discontinued by the manufacturer", detail });
+        } else {
+          const label =
+            report.state === "anticipated"
+              ? "Anticipated supply shortage"
+              : report.state === "unknown"
+                ? `Shortage report (status: ${report.status})`
+                : "Active supply shortage";
+          add(med.id, { code: "supply_shortage", label, detail });
+        }
+      }
     }
   }
 

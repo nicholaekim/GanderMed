@@ -68,6 +68,12 @@ explicit not_instrumented list (reopened alerts, in-wizard drop-off timing
 need an event log — still open). Server-side PDF export remains a
 cross-cutting deferred item.
 
+## Shortages — DONE (see CLAUDE.md "Drug shortages")
+Deferred follow-ons: scheduled/background sync instead of the manual
+refresh button, same-ingredient DPD alternatives listed as information
+(never a recommendation), patient-facing notification when a med they take
+enters shortage, and shortage counts in the pilot metrics panel.
+
 ## Cross-cutting deferred items
 - Email verification flow for password accounts (Resend/Postmark) — until
   then password accounts stay unverified and cannot be Google-link targets

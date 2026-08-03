@@ -14,6 +14,7 @@ import { computeAdherence } from "@/lib/adherence";
 import { ACCESS_PURPOSES, logAudit, requestAccessByCode, sweepExpiry } from "@/lib/access";
 import type { GrantRow } from "@/lib/access";
 import { activeLocation, activeMembership, isManagement } from "@/lib/org";
+import { countOpenShortages } from "@/lib/shortages";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -105,6 +106,7 @@ export async function GET(request: Request) {
     roster.push({
       adherence_pct: adherence.overall.adherence_pct,
       missed_14d: adherence.overall.counts.missed,
+      supply_alerts: countOpenShortages(db, profileId),
       grant_id: first.id,
       profile_id: profileId,
       patient_name: first.patient_name,

@@ -23,6 +23,8 @@ export default function ClinicPage() {
   const [requestAs, setRequestAs] = useState<string>("self");
   const [linkMsg, setLinkMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [supplyBusy, setSupplyBusy] = useState(false);
+  const [supplyMsg, setSupplyMsg] = useState<string | null>(null);
 
   const loadRoster = useCallback(async () => {
     const res = await fetch("/api/care-links");
@@ -112,6 +114,25 @@ export default function ClinicPage() {
     if (!res.ok) window.alert(data.error ?? "Could not send the request.");
     else setLinkMsg({ ok: true, text: `Team-access request sent — ${name} must approve it before your team sees anything.` });
     loadRoster();
+  }
+
+  async function refreshSupply() {
+    setSupplyBusy(true);
+    setSupplyMsg(null);
+    try {
+      const res = await fetch("/api/shortages", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setSupplyMsg(data.needs_key ? "Shortage checking isn't set up on this instance." : (data.error ?? "Refresh failed."));
+        return;
+      }
+      setSupplyMsg(
+        `Checked ${data.dins_checked} product${data.dins_checked === 1 ? "" : "s"}${data.note ? ` — ${data.note}` : ""}`
+      );
+      loadRoster();
+    } finally {
+      setSupplyBusy(false);
+    }
   }
 
   async function signOut() {
@@ -232,7 +253,20 @@ export default function ClinicPage() {
       <InvitationsPanel onRosterChanged={loadRoster} me={me} />
 
       <section className="mt-6">
-        <h2 className="mb-2 text-base font-semibold">Patients ({roster.length})</h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">Patients ({roster.length})</h2>
+          <div className="flex items-center gap-2">
+            {supplyMsg && <span className="text-xs text-slate-500">{supplyMsg}</span>}
+            <button
+              onClick={refreshSupply}
+              disabled={supplyBusy}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium shadow-sm hover:bg-slate-50 disabled:opacity-50"
+              title="Re-check your patients' medications against Health Canada's shortage database"
+            >
+              {supplyBusy ? "Checking supply…" : "Refresh supply data"}
+            </button>
+          </div>
+        </div>
         {!loaded ? (
           <p className="text-sm text-slate-400">Loading…</p>
         ) : roster.length === 0 ? (
@@ -309,6 +343,14 @@ export default function ClinicPage() {
                   >
                     {r.adherence_pct === null ? "no dose data" : `${r.adherence_pct}% adherence`}
                   </span>
+                  {r.supply_alerts > 0 && (
+                    <span
+                      className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-900"
+                      title="Health Canada has an open shortage or discontinuation report for this many of their medications"
+                    >
+                      {r.supply_alerts} supply
+                    </span>
+                  )}
                   {r.alerts_major > 0 && (
                     <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-800">
                       {r.alerts_major} major

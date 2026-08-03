@@ -197,6 +197,8 @@ export interface RosterEntry {
   /** Overall 14-day adherence; null = no scheduled doses were due ("no data", never 0%). */
   adherence_pct: number | null;
   missed_14d: number;
+  /** Active medications carrying an open Health Canada shortage/discontinuation report. */
+  supply_alerts: number;
   /** Every door reaching this patient (deduped roster rows carry them all). */
   access: {
     grant_id: number;

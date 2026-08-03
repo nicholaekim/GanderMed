@@ -110,6 +110,46 @@ CREATE TABLE IF NOT EXISTS care_links (
   UNIQUE (clinician_user_id, profile_id)
 );
 
+-- Cached Health Canada shortage/discontinuation reports, keyed by DIN so
+-- they join straight onto verified medications. Cache only: a missing row
+-- means "not checked", NEVER "no shortage" (see src/lib/shortages.ts).
+CREATE TABLE IF NOT EXISTS drug_shortages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('shortage','discontinuation')),
+  din TEXT NOT NULL,
+  brand_name TEXT,
+  company_name TEXT,
+  status TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('active','anticipated','resolved','discontinued','unknown')),
+  reason TEXT,
+  actual_start_date TEXT,
+  estimated_end_date TEXT,
+  actual_end_date TEXT,
+  source_updated_at TEXT,
+  fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(report_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_shortages_din ON drug_shortages(din, state);
+
+-- One row per DIN we have ever asked about: proves "checked and nothing
+-- found" separately from "never checked".
+CREATE TABLE IF NOT EXISTS shortage_checks (
+  din TEXT PRIMARY KEY,
+  checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  reports_found INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS shortage_syncs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL DEFAULT (datetime('now')),
+  actor_user_id INTEGER,
+  outcome TEXT NOT NULL CHECK (outcome IN ('ok','partial','error','not_configured')),
+  dins_checked INTEGER NOT NULL DEFAULT 0,
+  reports_upserted INTEGER NOT NULL DEFAULT 0,
+  note TEXT
+);
+
 CREATE TABLE IF NOT EXISTS organizations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,

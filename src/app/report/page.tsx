@@ -5,12 +5,31 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ACTUAL_USE_LABELS, DISPOSITION_LABELS, PROVENANCE_LABELS, type AccessGrantView, type Alert, type Disposition, type DoseEvent, type ExposureReport, type Medication, type Severity } from "@/lib/types";
 import type { AdherenceReport } from "@/lib/adherence";
+import type { ShortageLookup } from "@/lib/shortages";
 import { EXPOSURE_VERSION } from "@/data/ingredientProfiles";
 import { EVIDENCE_LABEL, SEVERITY_META, fmtDate, fmtTime, scheduleLabel } from "@/lib/format";
 import { titleCase } from "@/lib/normalize";
 import { pharmacistQuestions } from "@/lib/questions";
 import { RULESET_VERSION } from "@/data/interactionRules";
 import type { Evidence } from "@/lib/types";
+
+/** Prints an open Health Canada supply report, if one was actually retrieved. */
+function SupplyReportLine({ supply }: { supply: ShortageLookup | undefined }) {
+  if (!supply || supply.state !== "checked") return null;
+  const open = supply.reports.filter((r) => r.state !== "resolved");
+  if (open.length === 0) return null;
+  const first = open[0];
+  return (
+    <>
+      <br />
+      <span className="font-semibold text-amber-800">
+        Health Canada supply report:{" "}
+        {first.kind === "discontinuation" ? "discontinued by the manufacturer" : `shortage (${first.status})`}
+        {first.estimated_end_date ? `, estimated end ${first.estimated_end_date}` : ""} — checked {fmtDate(supply.as_of)}
+      </span>
+    </>
+  );
+}
 
 const EXPOSURE_LABEL: Record<string, string> = {
   overlap: "Recorded doses may have overlapped (estimate)",
@@ -49,19 +68,21 @@ function ReportInner() {
     Map<number, { disposition: Disposition; note: string | null; disposed_by_name: string | null; disposed_at: string | null }>
   >(new Map());
   const [accessGrants, setAccessGrants] = useState<AccessGrantView[]>([]);
+  const [supply, setSupply] = useState<Record<number, ShortageLookup>>({});
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
       const qs = patientParam ? `?patient=${patientParam}` : "";
       const eventsQs = patientParam ? `?patient=${patientParam}&days=14` : "?days=14";
-      const [mRes, aRes, eRes, xRes, adRes, rRes] = await Promise.all([
+      const [mRes, aRes, eRes, xRes, adRes, rRes, sRes] = await Promise.all([
         fetch(`/api/medications${qs}`),
         fetch(`/api/alerts${qs}`),
         fetch(`/api/dose-events${eventsQs}`),
         fetch(`/api/exposure${qs}`),
         fetch(`/api/adherence${eventsQs}`),
         fetch(`/api/reconcile${qs}`),
+        fetch(`/api/shortages${qs}`),
       ]);
       if (mRes.status === 401) {
         router.replace("/login");
@@ -89,6 +110,10 @@ function ReportInner() {
             )
           )
         );
+      }
+      if (sRes.ok) {
+        const sData = (await sRes.json()) as { medications: { medication_id: number; supply: ShortageLookup }[] };
+        setSupply(Object.fromEntries(sData.medications.map((m) => [m.medication_id, m.supply])));
       }
       // Consent context is shown only on the patient's own report — a
       // clinician printing it sees the reconciliation line, not other
@@ -182,6 +207,7 @@ function ReportInner() {
                           <span className="italic text-amber-700">“{m.patient_notes}”</span>
                         </>
                       )}
+                      <SupplyReportLine supply={supply[m.id]} />
                       {dispositions.has(m.id) && (
                         <>
                           <br />

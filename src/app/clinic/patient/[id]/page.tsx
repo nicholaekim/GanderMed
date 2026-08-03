@@ -13,6 +13,7 @@ import AdherenceCard from "@/components/AdherenceCard";
 import ReconcilePanel from "@/components/ReconcilePanel";
 import { titleCase } from "@/lib/normalize";
 import type { AdherenceReport } from "@/lib/adherence";
+import type { ShortageLookup } from "@/lib/shortages";
 
 export default function ClinicPatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -23,6 +24,7 @@ export default function ClinicPatientPage({ params }: { params: Promise<{ id: st
   const [events, setEvents] = useState<DoseEvent[]>([]);
   const [exposure, setExposure] = useState<ExposureReport | null>(null);
   const [adherence, setAdherence] = useState<AdherenceReport | null>(null);
+  const [supply, setSupply] = useState<Record<number, ShortageLookup>>({});
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,12 +41,13 @@ export default function ClinicPatientPage({ params }: { params: Promise<{ id: st
         return;
       }
       const qs = `?patient=${id}`;
-      const [mRes, aRes, eRes, xRes, adRes] = await Promise.all([
+      const [mRes, aRes, eRes, xRes, adRes, sRes] = await Promise.all([
         fetch(`/api/medications${qs}`),
         fetch(`/api/alerts${qs}`),
         fetch(`/api/dose-events${qs}&days=14`),
         fetch(`/api/exposure${qs}`),
         fetch(`/api/adherence${qs}&days=14`),
+        fetch(`/api/shortages${qs}`),
       ]);
       if (!mRes.ok) {
         setError((await mRes.json()).error ?? "No access to this patient.");
@@ -58,6 +61,10 @@ export default function ClinicPatientPage({ params }: { params: Promise<{ id: st
       if (eRes.ok) setEvents((await eRes.json()).events ?? []);
       if (xRes.ok) setExposure((await xRes.json()).exposure ?? null);
       if (adRes.ok) setAdherence((await adRes.json()).adherence ?? null);
+      if (sRes.ok) {
+        const data = (await sRes.json()) as { medications: { medication_id: number; supply: ShortageLookup }[] };
+        setSupply(Object.fromEntries(data.medications.map((m) => [m.medication_id, m.supply])));
+      }
       setLoaded(true);
     })();
   }, [id, router]);
@@ -137,7 +144,7 @@ export default function ClinicPatientPage({ params }: { params: Promise<{ id: st
             onReview={review}
             onWithdrawReview={withdrawReview}
           />
-          <MedicationList meds={meds} readOnly />
+          <MedicationList meds={meds} readOnly supply={supply} />
         </div>
       </div>
 

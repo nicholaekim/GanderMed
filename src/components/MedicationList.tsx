@@ -5,6 +5,8 @@ import { ACTUAL_USE_LABELS, type Medication, type SearchResult } from "@/lib/typ
 import { titleCase } from "@/lib/normalize";
 import { fmtDate, scheduleLabel } from "@/lib/format";
 import { DOSE_UNITS } from "@/components/AddMedication";
+import SupplyBadge from "@/components/SupplyBadge";
+import type { ShortageLookup } from "@/lib/shortages";
 
 /**
  * Inline editor for the fields a patient may change: dose, schedule, PRN,
@@ -264,6 +266,7 @@ function MedCard({
   onDelete,
   onChanged,
   readOnly,
+  supply,
 }: {
   med: Medication;
   onStop?: (id: number) => void;
@@ -271,6 +274,7 @@ function MedCard({
   onDelete?: (id: number) => void;
   onChanged?: () => void;
   readOnly?: boolean;
+  supply?: ShortageLookup;
 }) {
   const stopped = med.status === "stopped";
   const [editing, setEditing] = useState(false);
@@ -294,6 +298,7 @@ function MedCard({
               </span>
             )}
             {med.company_name && <span className="truncate">{titleCase(med.company_name)}</span>}
+            {med.status === "active" && <SupplyBadge supply={supply} compact />}
             {med.actual_use && med.actual_use !== "taking" && (
               <span
                 className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800"
@@ -392,6 +397,7 @@ export default function MedicationList({
   onDelete,
   onChanged,
   readOnly,
+  supply,
 }: {
   meds: Medication[];
   onStop?: (id: number) => void;
@@ -399,6 +405,7 @@ export default function MedicationList({
   onDelete?: (id: number) => void;
   onChanged?: () => void;
   readOnly?: boolean;
+  supply?: Record<number, ShortageLookup>;
 }) {
   const [showStopped, setShowStopped] = useState(false);
   const active = meds.filter((m) => m.status === "active");
@@ -414,7 +421,7 @@ export default function MedicationList({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {active.map((m) => (
-            <MedCard key={m.id} med={m} onStop={onStop} onResume={onResume} onDelete={onDelete} onChanged={onChanged} readOnly={readOnly} />
+            <MedCard key={m.id} med={m} onStop={onStop} onResume={onResume} onDelete={onDelete} onChanged={onChanged} readOnly={readOnly} supply={supply?.[m.id]} />
           ))}
         </div>
       )}
@@ -431,7 +438,7 @@ export default function MedicationList({
           {showStopped && (
             <div className="mt-2 grid gap-3 sm:grid-cols-2">
               {stopped.map((m) => (
-                <MedCard key={m.id} med={m} onStop={onStop} onResume={onResume} onDelete={onDelete} onChanged={onChanged} readOnly={readOnly} />
+                <MedCard key={m.id} med={m} onStop={onStop} onResume={onResume} onDelete={onDelete} onChanged={onChanged} readOnly={readOnly} supply={supply?.[m.id]} />
               ))}
             </div>
           )}

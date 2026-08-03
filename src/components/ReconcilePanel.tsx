@@ -30,6 +30,8 @@ const FLAG_STYLE: Record<string, string> = {
   interaction_unreviewed: "border-red-300 bg-red-50 text-red-800",
   missed_doses: "border-amber-300 bg-amber-50 text-amber-900",
   patient_note: "border-sky-300 bg-sky-50 text-sky-900",
+  supply_shortage: "border-amber-400 bg-amber-100 text-amber-900",
+  supply_discontinued: "border-red-300 bg-red-50 text-red-800",
 };
 
 interface ItemView {

@@ -15,6 +15,7 @@ import HistoryList from "@/components/HistoryList";
 import { pctBadgeClass } from "@/components/AdherenceCard";
 import { RULESET_VERSION } from "@/data/interactionRules";
 import type { AdherenceReport } from "@/lib/adherence";
+import type { ShortageLookup } from "@/lib/shortages";
 
 type Banner = { tone: "warn" | "ok"; text: string } | null;
 
@@ -26,22 +27,28 @@ export default function Dashboard() {
   const [events, setEvents] = useState<DoseEvent[]>([]);
   const [exposure, setExposure] = useState<ExposureReport | null>(null);
   const [adherence, setAdherence] = useState<AdherenceReport | null>(null);
+  const [supply, setSupply] = useState<Record<number, ShortageLookup>>({});
   const [loaded, setLoaded] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
 
   const loadAll = useCallback(async () => {
-    const [mRes, aRes, eRes, xRes, adRes] = await Promise.all([
+    const [mRes, aRes, eRes, xRes, adRes, sRes] = await Promise.all([
       fetch("/api/medications"),
       fetch("/api/alerts"),
       fetch("/api/dose-events?days=14"),
       fetch("/api/exposure"),
       fetch("/api/adherence?days=14"),
+      fetch("/api/shortages"),
     ]);
     if (mRes.ok) setMeds((await mRes.json()).medications ?? []);
     if (aRes.ok) setAlerts((await aRes.json()).alerts ?? []);
     if (eRes.ok) setEvents((await eRes.json()).events ?? []);
     if (xRes.ok) setExposure((await xRes.json()).exposure ?? null);
     if (adRes.ok) setAdherence((await adRes.json()).adherence ?? null);
+    if (sRes.ok) {
+      const data = (await sRes.json()) as { medications: { medication_id: number; supply: ShortageLookup }[] };
+      setSupply(Object.fromEntries(data.medications.map((m) => [m.medication_id, m.supply])));
+    }
     setLoaded(true);
   }, []);
 
@@ -240,6 +247,7 @@ export default function Dashboard() {
               onResume={(id) => setStatus(id, "active")}
               onDelete={deleteMed}
               onChanged={loadAll}
+              supply={supply}
             />
             {adherence && adherence.overall.expected_due > 0 && (
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-600">
