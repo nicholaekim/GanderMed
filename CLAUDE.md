@@ -79,6 +79,13 @@ Canadian medication logger with drug-conflict detection (formerly "Drug Conflict
 - `scripts/seed-demo.mjs` seeds 4 demo patients through the real APIs (needs the dev server up). Idempotent-ish: skips patients that already have meds. dose-events POST accepts optional `logged_at` for backdating (exists for this script).
 - Supplements (plain calcium etc.) are NHPs — in Health Canada's LNHPD, not the DPD. Tums is the DIN'd stand-in for calcium carbonate in demos.
 
+## Branches
+
+- `main` — everything merged and verified (tsc + full test suite + production build green before any merge). Merges are fast-forward from a feature branch; nothing is committed straight to main except docs.
+- `patient-app` — the patient experience: dashboard, Today/dose logging, medication list + editing, exposure panel, intake wizard, AccessPanel consent UI, patient-facing report.
+- `healthcare-portal` — the professional experience: `/clinic` roster, patient record view, alert reviews, reconciliation workspace, invitations, organizations, pilot metrics.
+- Both start identical to main. **They share a lot of code** (`src/lib/*`, `db.ts` schema, `types.ts`, MedicationList, AlertsPanel, the API routes with role checks), so keep them short-lived and merge back to main often — long-running parallel branches will conflict in the shared layer, and schema edits in both at once are the worst case. Rebase on main before merging.
+
 ## Commands
 
 - `npm run dev` — dev server on :3000. The script runs node with `--use-system-ca` because this machine's TLS interception breaks Node's bundled CA verification for outbound HTTPS (Health Canada API calls fail without it). Keep that flag.
